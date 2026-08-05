@@ -1,0 +1,4 @@
+-- Consolidated Supabase schema bootstrap for Fantasy Football AI War Room.
+-- Primary migration source files:
+--   db/migrations/001_init_tables.sql
+--   db/migrations/002_indexes_realtime.sql

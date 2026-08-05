@@ -1,0 +1,33 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache and build files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Streamlit local configuration / secrets
+.streamlit/secrets.toml
+
+# IDE settings
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,7 @@
+espn-api>=0.45.1
+python-dotenv>=1.0.1
+supabase>=2.6.0
+requests>=2.32.3
+pandas>=2.2.2
+streamlit>=1.37.0
+streamlit-searchbox>=0.1.20

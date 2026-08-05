@@ -1,0 +1,2 @@
+player_id,full_name,normalized_name,team,position,bye_week,tier,adp,projection_floor,projection_median,projection_ceiling,depth_role,handcuff_for_player_id,is_available
+espn_1,Sample Player,sample player,FA,RB,9,5,120.5,7.2,10.4,16.8,backup,,true

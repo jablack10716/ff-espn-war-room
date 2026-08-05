@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ArthurOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent", "reasoning_2_sentences", "top_3_picks", "fallback_used"],
+  "properties": {
+    "agent": { "const": "Arthur" },
+    "reasoning_2_sentences": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 500,
+      "pattern": "^.{20,500}[.!?]$"
+    },
+    "top_3_picks": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rank", "player_id", "player_name", "position", "composite_score"],
+        "properties": {
+          "rank": { "type": "integer", "enum": [1, 2, 3] },
+          "player_id": { "type": "string", "minLength": 1 },
+          "player_name": { "type": "string", "minLength": 1 },
+          "position": { "type": "string", "enum": ["QB", "RB", "WR", "TE", "K", "DST"] },
+          "composite_score": { "type": "number" }
+        }
+      }
+    },
+    "fallback_used": { "type": "boolean", "default": false }
+  }
+}

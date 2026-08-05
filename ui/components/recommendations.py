@@ -1,0 +1,141 @@
+"""Streamlit Component: Recommendations & Multi-Agent Synthesis Panel (Fragment B)."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+import streamlit as st
+
+
+def render_recommendations(
+    rankings: List[Dict[str, Any]],
+    agent_payload: Optional[Dict[str, Any]] = None,
+    user_roster: Optional[List[Dict[str, Any]]] = None,
+    top_n: int = 5,
+) -> None:
+    """Render Ada quantitative recommendations, multi-agent notes, and GM synthesis rationale."""
+    st.subheader("🎯 Recommendations & GM Synthesis")
+
+    # Render Arthur GM Synthesis Block & War Room Debate if available
+    if agent_payload:
+        reasoning = agent_payload.get("reasoning_2_sentences")
+        fallback = agent_payload.get("fallback_used", False)
+        marcus_dict = agent_payload.get("marcus_notes", {})
+        winston_dict = agent_payload.get("winston_notes", {})
+
+        if fallback:
+            st.info("⚡ **Ada Deterministic Mode**: Quant engine scores active.")
+        else:
+            st.success("🤖 **Arthur (GM) Multi-Agent Synthesis Active**")
+
+        if reasoning:
+            st.markdown(f"> 👑 **GM Strategy Rationale**: *\"{reasoning}\"*")
+
+        # Interactive War Room Debate & Commentary Expander
+        with st.expander("🗣️ Live War Room Agent Debate & Commentary", expanded=not fallback):
+            st.markdown("### 🎙️ The War Room Debate")
+            st.markdown(
+                "Here is the live exchange between **Marcus** (Upside Scout), **Winston** (Roster Architect), and **Arthur** (GM):"
+            )
+
+            col_m, col_w = st.columns(2)
+            with col_m:
+                st.markdown("#### 🏃 Marcus (Chief Scout)")
+                if marcus_dict:
+                    for pid, sentence in marcus_dict.items():
+                        st.markdown(f"- **{sentence}**")
+                else:
+                    st.caption("No scouting notes generated.")
+
+            with col_w:
+                st.markdown("#### 📋 Winston (Roster Architect)")
+                if winston_dict:
+                    for pid, sentence in winston_dict.items():
+                        st.markdown(f"- **{sentence}**")
+                else:
+                    st.caption("No roster notes generated.")
+
+            st.markdown("---")
+            st.markdown("#### 👑 Arthur (General Manager Verdict)")
+            st.write(reasoning or "Arthur synthesized Ada's quant baseline to lock in top recommendation.")
+
+        st.markdown("---")
+
+    if not rankings:
+        st.info("No available candidate recommendations.")
+        return
+
+    top_candidates = rankings[:top_n]
+    marcus_notes = agent_payload.get("marcus_notes", {}) if agent_payload else {}
+    winston_notes = agent_payload.get("winston_notes", {}) if agent_payload else {}
+
+    for item in top_candidates:
+        pid = str(item.get("player_id"))
+        rank = item.get("rank")
+        name = item.get("player_name")
+        pos = item.get("position")
+        team = item.get("team", "FA")
+        composite = item.get("composite_score")
+        tier = item.get("tier")
+        adp = item.get("adp")
+        bye = item.get("bye_week")
+        injury = item.get("injury_status", "ACTIVE")
+        bd = item.get("breakdown", {})
+
+        with st.container():
+            col_rank, col_details, col_scores = st.columns([1, 4, 4])
+
+            with col_rank:
+                st.markdown(f"### #{rank}")
+
+            with col_details:
+                st.markdown(f"**{name}** ({pos} - {team})")
+                bye_str = f"Bye: {bye}" if bye else "Bye: -"
+                st.caption(f"Tier: {tier} | ADP: {adp} | {bye_str} | Median Proj: {item.get('projection_median')} pts")
+
+                # Injury badge
+                if injury in ("OUT", "INJURY_RESERVE", "IR", "SUSPENSION"):
+                    st.error(f"🚑 {injury} — High risk injury/suspension")
+                elif injury in ("DOUBTFUL", "QUESTIONABLE"):
+                    st.warning(f"⚠️ {injury} — Monitor health before drafting")
+
+                # Bye week conflict check
+                if bye and user_roster:
+                    same_bye_count = sum(1 for r in user_roster if r.get("bye_week") == bye)
+                    if same_bye_count >= 2:
+                        st.warning(f"⚠️ Bye Week Conflict: {same_bye_count} players already on Bye {bye}")
+
+                # Value gap / ADP arbitrage badge
+                val_gap = item.get("value_gap", 0.0)
+                if val_gap >= 15.0:
+                    st.success(f"💎 STEAL ALERT: +{val_gap:.0f} picks of value vs ADP")
+                elif val_gap >= 8.0:
+                    st.info(f"📈 Good Value: +{val_gap:.0f} picks above ADP")
+                elif val_gap <= -10.0:
+                    st.warning(f"📉 Reach: {abs(val_gap):.0f} picks below ADP — consider waiting")
+
+                # Urgent indicators
+                prv_mult = bd.get("prv_mult", 1.0)
+                if prv_mult > 1.0:
+                    st.error(f"🔥 Position Run Alert! (PRV Boost: {prv_mult:.2f}x)")
+
+                hli_raw = bd.get("hli_raw", 0.0)
+                if hli_raw > item.get("projection_median", 0.0):
+                    st.success("🔒 High-Leverage Handcuff Protection")
+
+                # Agent Scout & Roster Notes
+                if pid in marcus_notes:
+                    st.markdown(f"🏃 **Marcus (Scout)**: *{marcus_notes[pid]}*")
+                if pid in winston_notes:
+                    st.markdown(f"📋 **Winston (Architect)**: *{winston_notes[pid]}*")
+
+            with col_scores:
+                st.metric("Composite Score", f"{composite:.4f}")
+                st.caption(
+                    f"OC_norm: {bd.get('oc_norm', 0.0):.2f} | "
+                    f"FCVS_norm: {bd.get('fcvs_norm', 0.0):.2f} | "
+                    f"HLI_norm: {bd.get('hli_norm', 0.0):.2f} | "
+                    f"RosterFit: {bd.get('roster_fit_mult', 1.0):.2f}"
+                )
+
+            st.divider()

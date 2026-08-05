@@ -1,0 +1,10 @@
+{
+  "rows_total": 970,
+  "unique_player_ids": 970,
+  "duplicate_player_ids": 0,
+  "missing_full_name": 0,
+  "invalid_position": 0,
+  "captured_at_utc": "2026-08-04T20:25:55.571757+00:00",
+  "league_id": 192204,
+  "season_year": 2026
+}

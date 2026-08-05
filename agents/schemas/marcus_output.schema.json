@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MarcusOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent", "player_id", "upside_sentence"],
+  "properties": {
+    "agent": { "const": "Marcus" },
+    "player_id": { "type": "string", "minLength": 1 },
+    "upside_sentence": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 280,
+      "pattern": "^.{10,280}[.!?]$"
+    }
+  }
+}

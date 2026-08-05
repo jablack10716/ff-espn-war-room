@@ -1,0 +1,618 @@
+{
+  "league_id": 192204,
+  "season_year": 2026,
+  "captured_at_utc": "2026-08-04T20:25:52.208733+00:00",
+  "scoring": {
+    "scoring_format": [
+      {
+        "abbr": "BLKKRTD",
+        "label": "Blocked Punt or FG return for TD",
+        "id": 93,
+        "points": 6.0
+      },
+      {
+        "abbr": "PA22",
+        "label": "22-27 points allowed",
+        "id": 122,
+        "points": -1.0
+      },
+      {
+        "abbr": "PA7",
+        "label": "7-13 points allowed",
+        "id": 91,
+        "points": 4.0
+      },
+      {
+        "abbr": "PA1",
+        "label": "1-6 points allowed",
+        "id": 90,
+        "points": 7.0
+      },
+      {
+        "abbr": "FGM40",
+        "label": "FG Missed (40-49 yards)",
+        "id": 79,
+        "points": -1.0
+      },
+      {
+        "abbr": "RTD",
+        "label": "TD Rush",
+        "id": 25,
+        "points": 6.0
+      },
+      {
+        "abbr": "FUML",
+        "label": "Total Fumbles Lost",
+        "id": 72,
+        "points": -2.0
+      },
+      {
+        "abbr": "INT",
+        "label": "Each Interception",
+        "id": 95,
+        "points": 2.0
+      },
+      {
+        "abbr": "PTD40",
+        "label": "40+ yard TD pass bonus",
+        "id": 15,
+        "points": 2.0
+      },
+      {
+        "abbr": "SF",
+        "label": "Each Safety",
+        "id": 98,
+        "points": 2.0
+      },
+      {
+        "abbr": "FGM0",
+        "label": "FG Missed (0-39 yards)",
+        "id": 82,
+        "points": -2.0
+      },
+      {
+        "abbr": "FR",
+        "label": "Each Fumble Recovered",
+        "id": 96,
+        "points": 2.0
+      },
+      {
+        "abbr": "PA46",
+        "label": "46+ points allowed",
+        "id": 125,
+        "points": -10.0
+      },
+      {
+        "abbr": "2PC",
+        "label": "2pt Passing Conversion",
+        "id": 19,
+        "points": 2.0
+      },
+      {
+        "abbr": "RETD",
+        "label": "TD Reception",
+        "id": 43,
+        "points": 6.0
+      },
+      {
+        "abbr": "BLKK",
+        "label": "Blocked Punt, PAT or FG",
+        "id": 97,
+        "points": 2.0
+      },
+      {
+        "abbr": "PRTD",
+        "label": "Punt Return TD",
+        "id": 102,
+        "points": 6.0
+      },
+      {
+        "abbr": "INTT",
+        "label": "Interceptions Thrown",
+        "id": 20,
+        "points": -2.0
+      },
+      {
+        "abbr": "RY",
+        "label": "Rushing Yards",
+        "id": 24,
+        "points": 0.1
+      },
+      {
+        "abbr": "REC",
+        "label": "Each reception",
+        "id": 53,
+        "points": 0.5
+      },
+      {
+        "abbr": "KRTD",
+        "label": "Kickoff Return TD",
+        "id": 101,
+        "points": 6.0
+      },
+      {
+        "abbr": "FTD",
+        "label": "Fumble Recovered for TD",
+        "id": 63,
+        "points": 6.0
+      },
+      {
+        "abbr": "FG0",
+        "label": "FG Made (0-39 yards)",
+        "id": 80,
+        "points": 3.0
+      },
+      {
+        "abbr": "PATM",
+        "label": "Each PAT Missed",
+        "id": 88,
+        "points": -2.0
+      },
+      {
+        "abbr": "PA28",
+        "label": "28-34 points allowed",
+        "id": 123,
+        "points": -4.0
+      },
+      {
+        "abbr": "PA35",
+        "label": "35-45 points allowed",
+        "id": 124,
+        "points": -7.0
+      },
+      {
+        "abbr": "FRTD",
+        "label": "Fumble Return TD",
+        "id": 104,
+        "points": 6.0
+      },
+      {
+        "abbr": "2PR",
+        "label": "2pt Rushing Conversion",
+        "id": 26,
+        "points": 2.0
+      },
+      {
+        "abbr": "FG40",
+        "label": "FG Made (40-49 yards)",
+        "id": 77,
+        "points": 4.0
+      },
+      {
+        "abbr": "PA14",
+        "label": "14-17 points allowed",
+        "id": 92,
+        "points": 1.0
+      },
+      {
+        "abbr": "SK",
+        "label": "Each Sack",
+        "id": 99,
+        "points": 1.0
+      },
+      {
+        "abbr": "RTD40",
+        "label": "40+ yard TD rush bonus",
+        "id": 35,
+        "points": 2.0
+      },
+      {
+        "abbr": "PY",
+        "label": "Passing Yards",
+        "id": 3,
+        "points": 0.04
+      },
+      {
+        "abbr": "PAT",
+        "label": "Each PAT Made",
+        "id": 86,
+        "points": 1.0
+      },
+      {
+        "abbr": "PA0",
+        "label": "0 points allowed",
+        "id": 89,
+        "points": 10.0
+      },
+      {
+        "abbr": "REY",
+        "label": "Receiving Yards",
+        "id": 42,
+        "points": 0.1
+      },
+      {
+        "abbr": "PTD",
+        "label": "TD Pass",
+        "id": 4,
+        "points": 6.0
+      },
+      {
+        "abbr": "2PRE",
+        "label": "2pt Receiving Conversion",
+        "id": 44,
+        "points": 2.0
+      },
+      {
+        "abbr": "INTTD",
+        "label": "Interception Return TD",
+        "id": 103,
+        "points": 6.0
+      },
+      {
+        "abbr": "RETD40",
+        "label": "40+ yard TD rec bonus",
+        "id": 45,
+        "points": 2.0
+      },
+      {
+        "abbr": "FG60",
+        "label": "FG Made (60+ yards)",
+        "id": 201,
+        "points": 5.0
+      },
+      {
+        "abbr": "FG50",
+        "label": "FG Made (50-59 yards)",
+        "id": 198,
+        "points": 5.0
+      }
+    ],
+    "scoring_type": "H2H_POINTS",
+    "settings_snapshot": {
+      "reg_season_count": 14,
+      "matchup_periods": {
+        "1": [
+          1
+        ],
+        "2": [
+          2
+        ],
+        "3": [
+          3
+        ],
+        "4": [
+          4
+        ],
+        "5": [
+          5
+        ],
+        "6": [
+          6
+        ],
+        "7": [
+          7
+        ],
+        "8": [
+          8
+        ],
+        "9": [
+          9
+        ],
+        "10": [
+          10
+        ],
+        "11": [
+          11
+        ],
+        "12": [
+          12
+        ],
+        "13": [
+          13
+        ],
+        "14": [
+          14
+        ],
+        "15": [
+          15
+        ],
+        "16": [
+          16
+        ],
+        "17": [
+          17
+        ]
+      },
+      "veto_votes_required": 0,
+      "team_count": 12,
+      "playoff_team_count": 8,
+      "keeper_count": 0,
+      "trade_deadline": 1796976000000,
+      "division_map": {
+        "0": "Bud Light Division",
+        "1": "Michelob Ultra Division",
+        "2": "Coors Light Division"
+      },
+      "name": "Gas City Gridiron",
+      "tie_rule": "NONE",
+      "playoff_tie_rule": "NONE",
+      "playoff_matchup_period_length": 1,
+      "playoff_seed_tie_rule": "H2H_RECORD",
+      "scoring_type": "H2H_POINTS",
+      "median_scoring": false,
+      "faab": true,
+      "acquisition_budget": 200,
+      "scoring_format": [
+        {
+          "abbr": "BLKKRTD",
+          "label": "Blocked Punt or FG return for TD",
+          "id": 93,
+          "points": 6.0
+        },
+        {
+          "abbr": "PA22",
+          "label": "22-27 points allowed",
+          "id": 122,
+          "points": -1.0
+        },
+        {
+          "abbr": "PA7",
+          "label": "7-13 points allowed",
+          "id": 91,
+          "points": 4.0
+        },
+        {
+          "abbr": "PA1",
+          "label": "1-6 points allowed",
+          "id": 90,
+          "points": 7.0
+        },
+        {
+          "abbr": "FGM40",
+          "label": "FG Missed (40-49 yards)",
+          "id": 79,
+          "points": -1.0
+        },
+        {
+          "abbr": "RTD",
+          "label": "TD Rush",
+          "id": 25,
+          "points": 6.0
+        },
+        {
+          "abbr": "FUML",
+          "label": "Total Fumbles Lost",
+          "id": 72,
+          "points": -2.0
+        },
+        {
+          "abbr": "INT",
+          "label": "Each Interception",
+          "id": 95,
+          "points": 2.0
+        },
+        {
+          "abbr": "PTD40",
+          "label": "40+ yard TD pass bonus",
+          "id": 15,
+          "points": 2.0
+        },
+        {
+          "abbr": "SF",
+          "label": "Each Safety",
+          "id": 98,
+          "points": 2.0
+        },
+        {
+          "abbr": "FGM0",
+          "label": "FG Missed (0-39 yards)",
+          "id": 82,
+          "points": -2.0
+        },
+        {
+          "abbr": "FR",
+          "label": "Each Fumble Recovered",
+          "id": 96,
+          "points": 2.0
+        },
+        {
+          "abbr": "PA46",
+          "label": "46+ points allowed",
+          "id": 125,
+          "points": -10.0
+        },
+        {
+          "abbr": "2PC",
+          "label": "2pt Passing Conversion",
+          "id": 19,
+          "points": 2.0
+        },
+        {
+          "abbr": "RETD",
+          "label": "TD Reception",
+          "id": 43,
+          "points": 6.0
+        },
+        {
+          "abbr": "BLKK",
+          "label": "Blocked Punt, PAT or FG",
+          "id": 97,
+          "points": 2.0
+        },
+        {
+          "abbr": "PRTD",
+          "label": "Punt Return TD",
+          "id": 102,
+          "points": 6.0
+        },
+        {
+          "abbr": "INTT",
+          "label": "Interceptions Thrown",
+          "id": 20,
+          "points": -2.0
+        },
+        {
+          "abbr": "RY",
+          "label": "Rushing Yards",
+          "id": 24,
+          "points": 0.1
+        },
+        {
+          "abbr": "REC",
+          "label": "Each reception",
+          "id": 53,
+          "points": 0.5
+        },
+        {
+          "abbr": "KRTD",
+          "label": "Kickoff Return TD",
+          "id": 101,
+          "points": 6.0
+        },
+        {
+          "abbr": "FTD",
+          "label": "Fumble Recovered for TD",
+          "id": 63,
+          "points": 6.0
+        },
+        {
+          "abbr": "FG0",
+          "label": "FG Made (0-39 yards)",
+          "id": 80,
+          "points": 3.0
+        },
+        {
+          "abbr": "PATM",
+          "label": "Each PAT Missed",
+          "id": 88,
+          "points": -2.0
+        },
+        {
+          "abbr": "PA28",
+          "label": "28-34 points allowed",
+          "id": 123,
+          "points": -4.0
+        },
+        {
+          "abbr": "PA35",
+          "label": "35-45 points allowed",
+          "id": 124,
+          "points": -7.0
+        },
+        {
+          "abbr": "FRTD",
+          "label": "Fumble Return TD",
+          "id": 104,
+          "points": 6.0
+        },
+        {
+          "abbr": "2PR",
+          "label": "2pt Rushing Conversion",
+          "id": 26,
+          "points": 2.0
+        },
+        {
+          "abbr": "FG40",
+          "label": "FG Made (40-49 yards)",
+          "id": 77,
+          "points": 4.0
+        },
+        {
+          "abbr": "PA14",
+          "label": "14-17 points allowed",
+          "id": 92,
+          "points": 1.0
+        },
+        {
+          "abbr": "SK",
+          "label": "Each Sack",
+          "id": 99,
+          "points": 1.0
+        },
+        {
+          "abbr": "RTD40",
+          "label": "40+ yard TD rush bonus",
+          "id": 35,
+          "points": 2.0
+        },
+        {
+          "abbr": "PY",
+          "label": "Passing Yards",
+          "id": 3,
+          "points": 0.04
+        },
+        {
+          "abbr": "PAT",
+          "label": "Each PAT Made",
+          "id": 86,
+          "points": 1.0
+        },
+        {
+          "abbr": "PA0",
+          "label": "0 points allowed",
+          "id": 89,
+          "points": 10.0
+        },
+        {
+          "abbr": "REY",
+          "label": "Receiving Yards",
+          "id": 42,
+          "points": 0.1
+        },
+        {
+          "abbr": "PTD",
+          "label": "TD Pass",
+          "id": 4,
+          "points": 6.0
+        },
+        {
+          "abbr": "2PRE",
+          "label": "2pt Receiving Conversion",
+          "id": 44,
+          "points": 2.0
+        },
+        {
+          "abbr": "INTTD",
+          "label": "Interception Return TD",
+          "id": 103,
+          "points": 6.0
+        },
+        {
+          "abbr": "RETD40",
+          "label": "40+ yard TD rec bonus",
+          "id": 45,
+          "points": 2.0
+        },
+        {
+          "abbr": "FG60",
+          "label": "FG Made (60+ yards)",
+          "id": 201,
+          "points": 5.0
+        },
+        {
+          "abbr": "FG50",
+          "label": "FG Made (50-59 yards)",
+          "id": 198,
+          "points": 5.0
+        }
+      ],
+      "position_slot_counts": {
+        "QB": 1,
+        "TQB": 0,
+        "RB": 2,
+        "RB/WR": 0,
+        "WR": 2,
+        "WR/TE": 0,
+        "TE": 1,
+        "OP": 1,
+        "DT": 0,
+        "DE": 0,
+        "LB": 0,
+        "DL": 0,
+        "CB": 0,
+        "S": 0,
+        "DB": 0,
+        "DP": 0,
+        "D/ST": 1,
+        "K": 0,
+        "P": 0,
+        "HC": 0,
+        "BE": 8,
+        "IR": 0,
+        "": 0,
+        "RB/WR/TE": 1,
+        "ER": 0
+      }
+    }
+  }
+}

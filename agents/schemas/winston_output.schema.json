@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WinstonOutput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["agent", "player_id", "need_sentence"],
+  "properties": {
+    "agent": { "const": "Winston" },
+    "player_id": { "type": "string", "minLength": 1 },
+    "need_sentence": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 280,
+      "pattern": "^.{10,280}[.!?]$"
+    }
+  }
+}

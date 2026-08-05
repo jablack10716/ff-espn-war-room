@@ -78,3 +78,46 @@ def test_vor_in_composite(sample_vor_players):
     for r in rankings:
         assert "vor_raw" in r["breakdown"]
         assert "vor_norm" in r["breakdown"]
+
+
+def test_effective_starters_superflex():
+    """SUPERFLEX adds +1.0 to QB effective starters; FLEX distributes fractionally."""
+    from engine.scoring_models import calculate_effective_starters
+
+    reqs = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPERFLEX": 1, "DST": 1}
+    effective = calculate_effective_starters(reqs)
+
+    # QB: 1 base + 1.0 from SUPERFLEX = 2.0
+    assert effective["QB"] == 2.0
+    # RB: 2 base + 0.45 from FLEX = 2.45
+    assert abs(effective["RB"] - 2.45) < 0.001
+    # WR: 2 base + 0.35 from FLEX = 2.35
+    assert abs(effective["WR"] - 2.35) < 0.001
+    # TE: 1 base + 0.20 from FLEX = 1.20
+    assert abs(effective["TE"] - 1.20) < 0.001
+    # DST: 1 base, no flex/sf contribution
+    assert effective["DST"] == 1.0
+
+
+def test_vor_superflex_doubles_qb_baseline():
+    """In Superflex, QB replacement index should be num_teams * 2 (24th QB in 12-team)."""
+    # Create 30 QBs with descending projections
+    qbs = [
+        {"player_id": f"qb{i}", "position": "QB", "projection_median": 400.0 - (i * 5), "is_available": True}
+        for i in range(30)
+    ]
+
+    # Standard 1QB league: replacement at index 12 (13th QB, proj = 400 - 60 = 340)
+    standard_req = {"QB": 1}
+    vor_standard = calculate_vor(qbs[0], qbs, standard_req, num_teams=12)
+
+    # Superflex league: replacement at index 24 (25th QB, proj = 400 - 120 = 280)
+    sf_req = {"QB": 1, "SUPERFLEX": 1}
+    vor_sf = calculate_vor(qbs[0], qbs, sf_req, num_teams=12)
+
+    # QB1 projection = 400
+    # Standard baseline = 400 - 60 = 340 -> VOR = 60
+    # Superflex baseline = 400 - 120 = 280 -> VOR = 120
+    assert vor_standard == 60.0
+    assert vor_sf == 120.0
+    assert vor_sf > vor_standard  # Superflex dramatically increases QB value

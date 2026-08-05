@@ -306,12 +306,51 @@ def extract_scoring_rules(league: League) -> Dict[str, Any]:
     return scoring_payload
 
 
-def extract_teams(league: League) -> List[Dict[str, Any]]:
+def fetch_espn_pick_order(
+    league_id: int,
+    season_year: int,
+    espn_s2: str = "",
+    swid: str = "",
+) -> List[int]:
+    """Fetch draft pickOrder array from ESPN raw league settings API endpoint."""
+    try:
+        import requests
+
+        url = f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season_year}/segments/0/leagues/{league_id}"
+        cookies = {}
+        if espn_s2:
+            cookies["espn_s2"] = espn_s2
+        if swid:
+            cookies["SWID"] = swid
+        r = requests.get(url, params={"view": "mSettings"}, cookies=cookies, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            pick_order = data.get("settings", {}).get("draftSettings", {}).get("pickOrder", [])
+            if isinstance(pick_order, list):
+                return [int(x) for x in pick_order]
+    except Exception as exc:
+        LOGGER.warning("Failed to fetch draft pickOrder from ESPN API: %s", exc)
+    return []
+
+
+def extract_teams(
+    league: League,
+    pick_order: Optional[List[int]] = None,
+) -> List[Dict[str, Any]]:
     """Extract list of teams, team slots, and team names from ESPN League."""
     teams_list: List[Dict[str, Any]] = []
     teams = getattr(league, "teams", []) or []
 
-    for idx, team in enumerate(teams, start=1):
+    if pick_order:
+        order_map = {int(tid): idx + 1 for idx, tid in enumerate(pick_order)}
+        sorted_teams = sorted(
+            teams,
+            key=lambda t: (order_map.get(int(getattr(t, "team_id", 0)), 999), getattr(t, "team_id", 0)),
+        )
+    else:
+        sorted_teams = sorted(teams, key=lambda t: getattr(t, "team_id", 0))
+
+    for idx, team in enumerate(sorted_teams, start=1):
         team_id = getattr(team, "team_id", idx)
         team_name = getattr(team, "team_name", f"Team {team_id}")
         owner = getattr(team, "owner", "")
@@ -325,12 +364,15 @@ def extract_teams(league: League) -> List[Dict[str, Any]]:
             "standing": standing,
         })
 
-    return sorted(teams_list, key=lambda x: x["team_slot"])
+    return teams_list
 
 
 def extract_roster_requirements(league: League) -> Dict[str, int]:
-    """Extract position starter requirements from ESPN League settings."""
-    defaults = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DST": 1}
+    """Extract position starter requirements from ESPN League settings.
+
+    Falls back to raw API lineupSlotCounts if the python package doesn't expose them.
+    """
+    defaults = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPERFLEX": 1, "DST": 1}
     settings = getattr(league, "settings", None)
 
     if settings is None:
@@ -350,6 +392,100 @@ def extract_roster_requirements(league: League) -> Dict[str, int]:
 
     return defaults
 
+
+# ESPN lineup slot ID -> position name mapping
+_ESPN_SLOT_ID_MAP: Dict[int, str] = {
+    0: "QB",
+    2: "RB",
+    4: "WR",
+    6: "TE",
+    7: "SUPERFLEX",   # OP (Offensive Player)
+    16: "DST",
+    17: "K",
+    23: "FLEX",        # RB/WR/TE
+}
+
+
+def fetch_espn_roster_and_scoring(
+    league_id: int,
+    season_year: int,
+    espn_s2: str = "",
+    swid: str = "",
+) -> Dict[str, Any]:
+    """Fetch roster slot counts and scoring format from the ESPN raw settings API.
+
+    Returns a dict with:
+        - "roster_requirements": Dict[str, int] mapping position -> count
+        - "scoring_format": str ("PPR", "HALF_PPR", or "STANDARD")
+        - "total_rounds": int or None (if available from draftSettings)
+    Returns empty dict on failure.
+    """
+    try:
+        import requests
+
+        url = (
+            f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/"
+            f"{season_year}/segments/0/leagues/{league_id}"
+        )
+        cookies: Dict[str, str] = {}
+        if espn_s2:
+            cookies["espn_s2"] = espn_s2
+        if swid:
+            cookies["SWID"] = swid
+
+        r = requests.get(url, params={"view": "mSettings"}, cookies=cookies, timeout=10)
+        if r.status_code != 200:
+            LOGGER.warning("ESPN mSettings returned HTTP %s", r.status_code)
+            return {}
+
+        data = r.json()
+        settings = data.get("settings", {})
+
+        # --- Roster Requirements from lineupSlotCounts ---
+        roster_settings = settings.get("rosterSettings", {})
+        lineup_slot_counts = roster_settings.get("lineupSlotCounts", {})
+        roster_requirements: Dict[str, int] = {}
+        if lineup_slot_counts:
+            for slot_id_str, count in lineup_slot_counts.items():
+                slot_id = int(slot_id_str)
+                pos_name = _ESPN_SLOT_ID_MAP.get(slot_id)
+                if pos_name and int(count) > 0:
+                    roster_requirements[pos_name] = int(count)
+            LOGGER.info("Extracted roster requirements from ESPN API: %s", roster_requirements)
+
+        # --- Scoring Format from statId 53 (receptions) ---
+        scoring_format = "STANDARD"
+        scoring_settings = settings.get("scoringSettings", {})
+        scoring_items = scoring_settings.get("scoringItems", [])
+        for item in scoring_items:
+            if item.get("statId") == 53:
+                ppr_val = item.get("pointsOverride") or item.get("points", 0)
+                if ppr_val == 1.0:
+                    scoring_format = "PPR"
+                elif ppr_val == 0.5:
+                    scoring_format = "HALF_PPR"
+                else:
+                    scoring_format = "STANDARD"
+                LOGGER.info("Detected scoring format: %s (reception pts=%.1f)", scoring_format, ppr_val)
+                break
+
+        # --- Draft rounds (if available) ---
+        draft_settings = settings.get("draftSettings", {})
+        total_rounds = draft_settings.get("rounds")
+
+        result: Dict[str, Any] = {
+            "scoring_format": scoring_format,
+        }
+        if roster_requirements:
+            result["roster_requirements"] = roster_requirements
+        if total_rounds is not None:
+            result["total_rounds"] = int(total_rounds)
+
+        return result
+
+    except Exception as exc:
+        LOGGER.warning("Failed to fetch roster/scoring from ESPN API: %s", exc)
+        return {}
 
 
 def collect_players(league: League) -> List[Any]:
@@ -522,7 +658,13 @@ def sync_espn_league_data(
         swid=swid,
     )
 
-    teams = extract_teams(league)
+    pick_order = fetch_espn_pick_order(
+        league_id=league_id,
+        season_year=season_year,
+        espn_s2=espn_s2,
+        swid=swid,
+    )
+    teams = extract_teams(league, pick_order=pick_order)
     roster_reqs = extract_roster_requirements(league)
     scoring_payload = extract_scoring_rules(league)
     scoring_fmt = derive_scoring_format(league)
@@ -562,7 +704,13 @@ def main() -> None:
 
     LOGGER.info("Extracting scoring settings, team metadata, and collecting player pool")
     scoring_payload = extract_scoring_rules(league)
-    teams = extract_teams(league)
+    pick_order = fetch_espn_pick_order(
+        league_id=config.league_id,
+        season_year=config.season_year,
+        espn_s2=config.espn_s2_cookie,
+        swid=config.espn_swid_cookie,
+    )
+    teams = extract_teams(league, pick_order=pick_order)
     roster_reqs = extract_roster_requirements(league)
     players = collect_players(league)
 

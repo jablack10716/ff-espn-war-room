@@ -16,6 +16,7 @@ def render_draft_board(
     num_teams: int = 12,
     is_mock_mode: bool = False,
     is_3rr: bool = False,
+    espn_teams: Optional[List[Dict[str, Any]]] = None,
     on_simulate_pick: Optional[Callable[[], None]] = None,
     on_simulate_to_user_turn: Optional[Callable[[], None]] = None,
     on_reset_draft: Optional[Callable[[], None]] = None,
@@ -39,8 +40,19 @@ def render_draft_board(
 
     calc_slot = (num_teams - pick_in_round) if is_even_round else (pick_in_round + 1)
 
+    # Map team_slot to team_name if available
+    teams_map: Dict[int, str] = {}
+    if espn_teams:
+        teams_map = {
+            int(t["team_slot"]): str(t.get("team_name", f"Team {t['team_slot']}"))
+            for t in espn_teams
+            if "team_slot" in t
+        }
+
+    current_team_name = teams_map.get(calc_slot, f"Team Slot {calc_slot}")
+
     with col_input:
-        st.markdown(f"**Current Pick**: #{current_pick} (Round {calc_round}, Team Slot {calc_slot})")
+        st.markdown(f"**Current Pick**: #{current_pick} (Round {calc_round}, {current_team_name})")
 
         # Player search dropdown
         player_options = {
@@ -100,7 +112,7 @@ def render_draft_board(
             {
                 "Pick #": p.get("pick_no"),
                 "Round": p.get("round_no"),
-                "Slot": p.get("team_slot"),
+                "Team": p.get("team_name") or teams_map.get(int(p.get("team_slot", 0)), f"Slot {p.get('team_slot')}"),
                 "Player": p.get("player_name"),
                 "Pos": p.get("position"),
                 "By User": "YES" if p.get("picked_by_user") else "NO",

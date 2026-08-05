@@ -145,6 +145,89 @@ def calculate_hli_raw(
     return round(median * 1.0, 4)
 
 
+# Flex eligibility sets
+FLEX_ELIGIBLE = {"RB", "WR", "TE"}
+SUPERFLEX_ELIGIBLE = {"QB", "RB", "WR", "TE"}
+
+# Fractional starter weights for FLEX/SUPERFLEX slot distribution
+# Reflects typical optimal usage: FLEX dominated by RBs, SUPERFLEX by QBs.
+FLEX_WEIGHTS: Dict[str, float] = {"RB": 0.45, "WR": 0.35, "TE": 0.20}
+SUPERFLEX_WEIGHTS: Dict[str, float] = {"QB": 1.0, "RB": 0.0, "WR": 0.0, "TE": 0.0}
+
+
+def calculate_effective_starters(
+    roster_requirements: Dict[str, int],
+) -> Dict[str, float]:
+    """Calculate effective starter counts per position, distributing FLEX/SUPERFLEX slots.
+
+    SUPERFLEX adds +1.0 to QB starters (nearly all teams start a QB2 in SF).
+    FLEX distributes fractionally: +0.45 RB, +0.35 WR, +0.20 TE.
+
+    Returns a dict mapping position -> effective starter count (float).
+    """
+    effective: Dict[str, float] = {}
+    flex_count = roster_requirements.get("FLEX", 0)
+    sf_count = roster_requirements.get("SUPERFLEX", 0)
+
+    for pos in ("QB", "RB", "WR", "TE", "K", "DST"):
+        base = float(roster_requirements.get(pos, 0))
+        # Add FLEX fractional starters
+        if flex_count > 0 and pos in FLEX_WEIGHTS:
+            base += flex_count * FLEX_WEIGHTS[pos]
+        # Add SUPERFLEX fractional starters
+        if sf_count > 0 and pos in SUPERFLEX_WEIGHTS:
+            base += sf_count * SUPERFLEX_WEIGHTS[pos]
+        effective[pos] = base
+
+    return effective
+
+
+def _count_flex_slots_filled(
+    user_roster: Sequence[Dict[str, Any]],
+    roster_requirements: Dict[str, int],
+) -> Dict[str, int]:
+    """Count how many FLEX and SUPERFLEX slots the user has filled.
+
+    Returns {"FLEX": int, "SUPERFLEX": int} representing filled slot counts.
+    Assignment priority: overflow players fill FLEX first, then SUPERFLEX.
+    QB overflow can only fill SUPERFLEX.
+    """
+    # Count players by position
+    counts: Dict[str, int] = {}
+    for p in user_roster:
+        pos = str(p.get("position", "")).upper()
+        counts[pos] = counts.get(pos, 0) + 1
+
+    # Calculate overflow per position (players beyond base starter requirement)
+    overflow: Dict[str, int] = {}
+    for pos in ("QB", "RB", "WR", "TE"):
+        base_req = roster_requirements.get(pos, 0)
+        overflow[pos] = max(0, counts.get(pos, 0) - base_req)
+
+    flex_max = roster_requirements.get("FLEX", 0)
+    sf_max = roster_requirements.get("SUPERFLEX", 0)
+    flex_filled = 0
+    sf_filled = 0
+
+    # Fill FLEX first (RB/WR/TE overflow)
+    for pos in ("RB", "WR", "TE"):
+        can_assign = min(overflow[pos], flex_max - flex_filled)
+        flex_filled += can_assign
+        overflow[pos] -= can_assign
+
+    # Fill SUPERFLEX (QB overflow first, then remaining RB/WR/TE overflow)
+    qb_to_sf = min(overflow.get("QB", 0), sf_max - sf_filled)
+    sf_filled += qb_to_sf
+    overflow["QB"] = overflow.get("QB", 0) - qb_to_sf
+
+    for pos in ("RB", "WR", "TE"):
+        can_assign = min(overflow[pos], sf_max - sf_filled)
+        sf_filled += can_assign
+        overflow[pos] -= can_assign
+
+    return {"FLEX": flex_filled, "SUPERFLEX": sf_filled}
+
+
 def calculate_roster_fit(
     player: Dict[str, Any],
     user_roster: Sequence[Dict[str, Any]],
@@ -152,29 +235,50 @@ def calculate_roster_fit(
     roster_requirements: Optional[Dict[str, int]] = None,
     available_players: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> float:
-    """Calculate gradient RosterFit multiplier based on positional demand and scarcity."""
+    """Calculate gradient RosterFit multiplier based on positional demand and scarcity.
+
+    Accounts for FLEX and SUPERFLEX slot eligibility when computing positional need.
+    """
     if roster_requirements is None:
         roster_requirements = {
             "QB": 1,
             "RB": 2,
             "WR": 2,
             "TE": 1,
-            "K": 1,
+            "FLEX": 1,
+            "SUPERFLEX": 1,
             "DST": 1,
         }
 
     pos = str(player.get("position", "")).upper()
 
-    # Early K/DST suppression
+    # Early DST suppression (K removed from default but still handled)
     if pos in ("K", "DST") and round_no < 10:
         return 0.30
 
-    req_starters = roster_requirements.get(pos, 1)
+    # Base starter slots for this position
+    req_starters = roster_requirements.get(pos, 0)
     current_count = sum(
         1 for p in user_roster if str(p.get("position", "")).upper() == pos
     )
 
-    slots_needed = req_starters - current_count
+    # Calculate flex slot availability
+    flex_slots = _count_flex_slots_filled(user_roster, roster_requirements)
+    flex_max = roster_requirements.get("FLEX", 0)
+    sf_max = roster_requirements.get("SUPERFLEX", 0)
+
+    # Determine total slots this position can fill
+    total_slots = req_starters
+    if pos in FLEX_ELIGIBLE:
+        total_slots += flex_max
+    if pos in SUPERFLEX_ELIGIBLE:
+        total_slots += sf_max
+
+    # Effective slots needed = base slots needed + unfilled flex/sf slots this position can fill
+    base_slots_needed = req_starters - current_count
+    unfilled_flex = (flex_max - flex_slots["FLEX"]) if pos in FLEX_ELIGIBLE else 0
+    unfilled_sf = (sf_max - flex_slots["SUPERFLEX"]) if pos in SUPERFLEX_ELIGIBLE else 0
+    total_slots_needed = base_slots_needed + unfilled_flex + unfilled_sf
 
     # Calculate positional scarcity
     remaining_at_pos = 999
@@ -185,23 +289,32 @@ def calculate_roster_fit(
         )
 
     mult = 1.0
-    if slots_needed >= 2:
+    if base_slots_needed >= 2:
         mult = 1.50
-    elif slots_needed == 1:
+    elif base_slots_needed == 1:
         if remaining_at_pos <= 15:
             mult = 1.40
         elif remaining_at_pos <= 30:
             mult = 1.20
         else:
             mult = 1.10
-    else:  # slots_needed <= 0
+    elif total_slots_needed > 0:
+        # Base slots filled but FLEX/SUPERFLEX slots available for this position
+        if pos == "QB" and unfilled_sf > 0:
+            # QB2 for SUPERFLEX is very high value
+            if remaining_at_pos <= 20:
+                mult = 1.35
+            else:
+                mult = 1.15
+        else:
+            # Generic flex fill
+            mult = 1.00
+    else:
+        # All slots filled — bench territory
         if round_no <= 6:
             mult = 0.60
         else:
             mult = 0.80
-
-    if round_no >= 8 and pos in ("QB", "TE") and current_count == 0:
-        mult = max(mult, 1.50)
 
     return round(mult, 4)
 
@@ -214,8 +327,10 @@ def calculate_vor(
 ) -> float:
     """Calculate Value Over Replacement (VOR/VORP) for a candidate player.
 
-    Replacement level is defined as the projection of the (num_teams * starters + 1)-th player
-    at that specific position.
+    Replacement level is defined as the projection of the (num_teams * effective_starters + 1)-th
+    player at that specific position.  When FLEX or SUPERFLEX slots are present in
+    roster_requirements, effective starters are computed via fractional distribution
+    so that QB replacement level correctly accounts for Superflex.
     """
     if roster_requirements is None:
         roster_requirements = {
@@ -223,13 +338,17 @@ def calculate_vor(
             "RB": 2,
             "WR": 2,
             "TE": 1,
-            "K": 1,
+            "FLEX": 1,
+            "SUPERFLEX": 1,
             "DST": 1,
         }
 
     pos = str(player.get("position", "")).upper()
-    starters = roster_requirements.get(pos, 1)
-    replacement_index = num_teams * starters  # 0-indexed: represents the (num_teams * starters + 1)-th player
+
+    # Use effective starters (accounts for FLEX/SUPERFLEX distribution)
+    effective = calculate_effective_starters(roster_requirements)
+    starters = effective.get(pos, roster_requirements.get(pos, 1))
+    replacement_index = int(round(num_teams * starters))  # 0-indexed
 
     pos_players = [
         p for p in available_players

@@ -16,6 +16,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
+
 import streamlit as st
 
 from engine.ada_math import AdaQuantEngine
@@ -24,6 +28,8 @@ from services.heartbeat import HeartbeatWorker
 from services.realtime_listener import RealtimeListener
 from ui.components.connectivity_status import render_connectivity_status
 from ui.components.draft_board import render_draft_board
+from ui.components.full_draft_grid import render_full_draft_grid
+from ui.components.keeper_manager import render_keeper_manager
 from ui.components.recommendations import render_recommendations
 
 logging.basicConfig(level=logging.INFO)
@@ -52,9 +58,11 @@ def init_session_state() -> None:
     if "espn_teams" not in st.session_state:
         st.session_state.espn_teams = []
     if "roster_requirements" not in st.session_state:
-        st.session_state.roster_requirements = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DST": 1}
+        st.session_state.roster_requirements = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPERFLEX": 1, "DST": 1}
     if "scoring_format" not in st.session_state:
-        st.session_state.scoring_format = "STANDARD"
+        st.session_state.scoring_format = "HALF_PPR"
+    if "total_rounds" not in st.session_state:
+        st.session_state.total_rounds = 16
     if "realtime_listener" not in st.session_state:
         st.session_state.realtime_listener = None
     if "heartbeat_worker" not in st.session_state:
@@ -69,6 +77,78 @@ def init_session_state() -> None:
 
 def main() -> None:
     init_session_state()
+
+    # Instantiate draft state service early for sidebar components
+    service = DraftStateService(use_supabase=True)
+    available_players, draft_log = service.reconcile_state(st.session_state.draft_id)
+
+    # Callback handlers defined early for sidebar & board access
+    def handle_record_pick(
+        pick_no: int,
+        round_no: int,
+        team_slot: int,
+        player_id: str,
+        player_name: str,
+        position: str,
+        picked_by_user: bool,
+    ) -> None:
+        team_name = None
+        if st.session_state.espn_teams:
+            for t in st.session_state.espn_teams:
+                if int(t.get("team_slot", 0)) == int(team_slot):
+                    team_name = t.get("team_name")
+                    break
+
+        service.record_pick(
+            draft_id=st.session_state.draft_id,
+            pick_no=pick_no,
+            round_no=round_no,
+            team_slot=team_slot,
+            player_id=player_id,
+            player_name=player_name,
+            position=position,
+            team_name=team_name,
+            picked_by_user=picked_by_user,
+        )
+        st.rerun()
+
+    def handle_record_keeper(
+        pick_no: int,
+        round_no: int,
+        team_slot: int,
+        player_id: str,
+        player_name: str,
+        position: str,
+        team_name: str,
+        picked_by_user: bool,
+    ) -> None:
+        service.record_pick(
+            draft_id=st.session_state.draft_id,
+            pick_no=pick_no,
+            round_no=round_no,
+            team_slot=team_slot,
+            player_id=player_id,
+            player_name=player_name,
+            position=position,
+            team_name=team_name,
+            picked_by_user=picked_by_user,
+            source="keeper",
+            notes="Pre-draft keeper",
+        )
+        st.rerun()
+
+    def handle_undo_last_pick() -> None:
+        undone = service.undo_last_pick(st.session_state.draft_id)
+        if undone:
+            st.toast(f"Undone pick #{undone.get('pick_no')}: {undone.get('player_name')}")
+        else:
+            st.toast("No active pick events to undo.")
+        st.rerun()
+
+    def handle_reset_draft() -> None:
+        service.reset_draft(st.session_state.draft_id)
+        st.toast("Reset draft state successfully.")
+        st.rerun()
 
     st.title("🏈 Fantasy Football AI War Room")
     st.caption("Live Draft Assistant | Ada Quant Engine Active")
@@ -102,7 +182,7 @@ def main() -> None:
             else:
                 with st.spinner("Connecting to ESPN & updating database..."):
                     try:
-                        from data.espn_ingest import sync_espn_league_data
+                        from data.espn_ingest import sync_espn_league_data, fetch_espn_roster_and_scoring
                         res = sync_espn_league_data(
                             league_id=int(espn_league_id),
                             season_year=int(espn_year),
@@ -112,10 +192,27 @@ def main() -> None:
                         )
                         st.session_state.espn_teams = res["teams"]
                         st.session_state.num_teams = len(res["teams"]) if res["teams"] else st.session_state.num_teams
-                        st.session_state.roster_requirements = res.get("roster_requirements", st.session_state.roster_requirements)
-                        st.session_state.scoring_format = res.get("scoring_format", "STANDARD")
+
+                        # Fetch roster slots & scoring format from raw ESPN API
+                        api_settings = fetch_espn_roster_and_scoring(
+                            league_id=int(espn_league_id),
+                            season_year=int(espn_year),
+                            espn_s2=espn_s2,
+                            swid=espn_swid,
+                        )
+                        if api_settings.get("roster_requirements"):
+                            st.session_state.roster_requirements = api_settings["roster_requirements"]
+                        else:
+                            st.session_state.roster_requirements = res.get("roster_requirements", st.session_state.roster_requirements)
+                        if api_settings.get("scoring_format"):
+                            st.session_state.scoring_format = api_settings["scoring_format"]
+                        else:
+                            st.session_state.scoring_format = res.get("scoring_format", "STANDARD")
+                        if api_settings.get("total_rounds"):
+                            st.session_state.total_rounds = api_settings["total_rounds"]
+
                         st.success(f"Synced {res['player_count']} players & {len(res['teams'])} teams from ESPN!")
-                        st.caption(f"Scoring Format: **{st.session_state.scoring_format}**")
+                        st.caption(f"Scoring: **{st.session_state.scoring_format}** | Roster: {st.session_state.roster_requirements}")
                     except Exception as exc:
                         st.error(f"ESPN Sync failed: {exc}")
 
@@ -125,13 +222,23 @@ def main() -> None:
                 f"Slot {t['team_slot']}: {t['team_name']} ({t['owner']})": t["team_slot"]
                 for t in st.session_state.espn_teams
             }
-            selected_team_label = st.selectbox("Your Team (ESPN)", options=list(team_options.keys()))
+            default_index = 0
+            for idx, label in enumerate(team_options.keys()):
+                if "Eskimo Brothers" in label:
+                    default_index = idx
+                    break
+            selected_team_label = st.selectbox(
+                "Your Team (ESPN)",
+                options=list(team_options.keys()),
+                index=default_index,
+            )
             if selected_team_label:
                 st.session_state.user_team_slot = team_options[selected_team_label]
         else:
             st.session_state.user_team_slot = st.number_input("Your Team Slot", min_value=1, max_value=20, value=st.session_state.user_team_slot)
 
         st.session_state.num_teams = st.number_input("Total Teams", min_value=4, max_value=20, value=st.session_state.num_teams)
+        st.session_state.total_rounds = st.number_input("Draft Rounds", min_value=6, max_value=25, value=st.session_state.total_rounds)
 
         # Custom Draft Order & 3rd Round Reversal
         with st.expander("🔀 Custom Draft Order & Rules"):
@@ -150,6 +257,19 @@ def main() -> None:
                     t["team_slot"] = new_slot
                 # Keep sorted
                 st.session_state.espn_teams = sorted(st.session_state.espn_teams, key=lambda x: int(x["team_slot"]))
+
+        # Pre-Draft Keepers Manager
+        with st.expander("📌 Pre-Draft Keepers"):
+            render_keeper_manager(
+                available_players=available_players,
+                draft_log=draft_log,
+                espn_teams=st.session_state.espn_teams,
+                user_team_slot=st.session_state.user_team_slot,
+                num_teams=st.session_state.num_teams,
+                is_3rr=st.session_state.is_3rr,
+                on_record_keeper=handle_record_keeper,
+                on_undo_keeper=handle_undo_last_pick,
+            )
 
         st.markdown("---")
         st.subheader("⏱️ Agent Deliberation Timeout")
@@ -239,10 +359,10 @@ def main() -> None:
             fallback_mode=st.session_state.fallback_mode,
         )
 
-    # Instantiate services & orchestrator
-    service = DraftStateService(use_supabase=True)
+    # Instantiate quant engine & orchestrator
     quant_engine = AdaQuantEngine()
     from agents.war_room_agents import WarRoomOrchestrator
+
     orchestrator = WarRoomOrchestrator()
 
     # Wire Realtime Listener (once per session)
@@ -286,9 +406,16 @@ def main() -> None:
     # Load canonical state
     available_players, draft_log = service.reconcile_state(st.session_state.draft_id)
 
-    # Current pick calculation
-    picks_logged = len([e for e in draft_log if str(e.get("event_type", "PICK")).upper() == "PICK"])
-    current_pick = picks_logged + 1
+    # Current pick calculation (first unassigned pick_no)
+    taken_pick_nos = {
+        int(e.get("pick_no"))
+        for e in draft_log
+        if str(e.get("event_type", "PICK")).upper() == "PICK" and e.get("pick_no") is not None
+    }
+    current_pick = 1
+    while current_pick in taken_pick_nos:
+        current_pick += 1
+
     current_round = ((current_pick - 1) // st.session_state.num_teams) + 1
 
     # Snake draft slot logic helper
@@ -318,35 +445,7 @@ def main() -> None:
             break
         cur_check += 1
 
-    # Callback handlers
-    def handle_record_pick(
-        pick_no: int,
-        round_no: int,
-        team_slot: int,
-        player_id: str,
-        player_name: str,
-        position: str,
-        picked_by_user: bool,
-    ) -> None:
-        service.record_pick(
-            draft_id=st.session_state.draft_id,
-            pick_no=pick_no,
-            round_no=round_no,
-            team_slot=team_slot,
-            player_id=player_id,
-            player_name=player_name,
-            position=position,
-            picked_by_user=picked_by_user,
-        )
-        st.rerun()
-
-    def handle_undo_last_pick() -> None:
-        undone = service.undo_last_pick(st.session_state.draft_id)
-        if undone:
-            st.toast(f"Undone pick #{undone.get('pick_no')}: {undone.get('player_name')}")
-        else:
-            st.toast("No active pick events to undo.")
-        st.rerun()
+    # Simulator Callbacks
 
     def handle_simulate_pick() -> None:
         calc_slot = get_slot_for_pick(current_pick)
@@ -385,57 +484,71 @@ def main() -> None:
 
     from ui.components.my_roster import render_my_roster
 
-    # Layout: Recommendations | My Roster | Draft Board
-    col_recs, col_roster, col_board = st.columns([2, 1, 2])
+    # Main Page Tabs: Live War Room | Full Draft Board Grid
+    tab_war_room, tab_full_grid = st.tabs(["🎯 Live War Room", "📊 Full Draft Board Grid"])
 
-    with col_recs:
-        # Compute Ada rankings
-        rankings = quant_engine.compute_rankings(
-            available_players=available_players,
-            draft_log=draft_log,
-            user_team_slot=st.session_state.user_team_slot,
-            current_round=current_round,
-            current_pick=current_pick,
-            roster_requirements=st.session_state.roster_requirements,
-            num_teams=st.session_state.num_teams,
-            scoring_format=st.session_state.scoring_format,
-        )
+    with tab_war_room:
+        # Layout: Recommendations | My Roster | Draft Board
+        col_recs, col_roster, col_board = st.columns([2, 1, 2])
 
-        # Extract user roster for bye week checking & agent context
-        user_roster = [e for e in draft_log if int(e.get("team_slot", 0)) == user_slot]
-
-        # Trigger Multi-Agent Orchestrator if picks_until_user_turn <= 2
-        agent_payload = None
-        if orchestrator.should_trigger(picks_until_user_turn):
-            agent_payload = orchestrator.run_orchestration(
-                candidate_players=available_players,
-                user_roster=user_roster,
-                ada_rankings=rankings,
-                timeout_seconds=float(st.session_state.get("agent_timeout_seconds", 15)),
+        with col_recs:
+            # Compute Ada rankings
+            rankings = quant_engine.compute_rankings(
+                available_players=available_players,
+                draft_log=draft_log,
+                user_team_slot=st.session_state.user_team_slot,
+                current_round=current_round,
+                current_pick=current_pick,
+                roster_requirements=st.session_state.roster_requirements,
+                num_teams=st.session_state.num_teams,
+                scoring_format=st.session_state.scoring_format,
             )
 
-        render_recommendations(rankings, agent_payload=agent_payload, user_roster=user_roster, top_n=5)
+            # Extract user roster for bye week checking & agent context
+            user_roster = [e for e in draft_log if int(e.get("team_slot", 0)) == user_slot]
 
-    with col_roster:
-        render_my_roster(
-            draft_log=draft_log,
-            user_team_slot=st.session_state.user_team_slot,
-            roster_requirements=st.session_state.roster_requirements,
-        )
+            # Trigger Multi-Agent Orchestrator if picks_until_user_turn <= 2
+            agent_payload = None
+            if orchestrator.should_trigger(picks_until_user_turn):
+                agent_payload = orchestrator.run_orchestration(
+                    candidate_players=available_players,
+                    user_roster=user_roster,
+                    ada_rankings=rankings,
+                    timeout_seconds=float(st.session_state.get("agent_timeout_seconds", 15)),
+                )
 
-    with col_board:
-        render_draft_board(
-            available_players=available_players,
+            render_recommendations(rankings, agent_payload=agent_payload, user_roster=user_roster, top_n=5)
+
+        with col_roster:
+            render_my_roster(
+                draft_log=draft_log,
+                user_team_slot=st.session_state.user_team_slot,
+                roster_requirements=st.session_state.roster_requirements,
+            )
+
+        with col_board:
+            render_draft_board(
+                available_players=available_players,
+                draft_log=draft_log,
+                on_record_pick=handle_record_pick,
+                on_undo_last_pick=handle_undo_last_pick,
+                current_pick=current_pick,
+                num_teams=st.session_state.num_teams,
+                is_mock_mode=(st.session_state.draft_mode == "🧪 Practice Mock Draft"),
+                is_3rr=st.session_state.is_3rr,
+                espn_teams=st.session_state.espn_teams,
+                on_simulate_pick=handle_simulate_pick,
+                on_simulate_to_user_turn=handle_simulate_to_user_turn,
+                on_reset_draft=handle_reset_draft,
+            )
+
+    with tab_full_grid:
+        render_full_draft_grid(
             draft_log=draft_log,
-            on_record_pick=handle_record_pick,
-            on_undo_last_pick=handle_undo_last_pick,
-            current_pick=current_pick,
+            espn_teams=st.session_state.espn_teams,
             num_teams=st.session_state.num_teams,
-            is_mock_mode=(st.session_state.draft_mode == "🧪 Practice Mock Draft"),
             is_3rr=st.session_state.is_3rr,
-            on_simulate_pick=handle_simulate_pick,
-            on_simulate_to_user_turn=handle_simulate_to_user_turn,
-            on_reset_draft=handle_reset_draft,
+            total_rounds=st.session_state.total_rounds,
         )
 
 

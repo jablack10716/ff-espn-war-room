@@ -66,18 +66,20 @@ def validate_schema(data: Dict[str, Any], schema_name: str) -> bool:
 def call_llm_api(
     system_prompt: str,
     user_prompt: str,
+    model: Optional[str] = None,
     timeout_seconds: float = 5.0,
 ) -> Optional[str]:
-    """Call OpenRouter or Gemini LLM API with strict timeout."""
+    """Call Google Gemini LLM API with strict timeout."""
     load_dotenv()
-    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
         LOGGER.info("No LLM API key present in environment; defaulting to fallback")
         return None
 
-    url = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
-    model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+    url = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+    if not model:
+        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -110,8 +112,9 @@ def call_llm_api(
 class MarcusAgent:
     """Marcus: Chief Scout evaluating upside pathways."""
 
-    def __init__(self) -> None:
+    def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "marcus_system.txt")
+        self.model = model or os.getenv("MARCUS_MODEL") or "gemini-2.5-flash"
 
     def evaluate_player(
         self, player: Dict[str, Any], timeout_seconds: float = 5.0
@@ -132,7 +135,9 @@ class MarcusAgent:
             f"Return strict JSON matching schema with keys: agent='Marcus', player_id='{pid}', upside_sentence."
         )
 
-        raw_response = call_llm_api(self.system_prompt, user_prompt, timeout_seconds)
+        raw_response = call_llm_api(
+            self.system_prompt, user_prompt, model=self.model, timeout_seconds=timeout_seconds
+        )
         if raw_response:
             try:
                 data = json.loads(raw_response)
@@ -163,8 +168,9 @@ class MarcusAgent:
 class WinstonAgent:
     """Winston: Roster Architect evaluating structural roster needs."""
 
-    def __init__(self) -> None:
+    def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "winston_system.txt")
+        self.model = model or os.getenv("WINSTON_MODEL") or "gemini-2.5-flash"
 
     def evaluate_player(
         self,
@@ -192,7 +198,9 @@ class WinstonAgent:
             f"Return strict JSON matching schema with keys: agent='Winston', player_id='{pid}', need_sentence."
         )
 
-        raw_response = call_llm_api(self.system_prompt, user_prompt, timeout_seconds)
+        raw_response = call_llm_api(
+            self.system_prompt, user_prompt, model=self.model, timeout_seconds=timeout_seconds
+        )
         if raw_response:
             try:
                 data = json.loads(raw_response)
@@ -223,8 +231,9 @@ class WinstonAgent:
 class ArthurAgent:
     """Arthur: General Manager synthesizing Scout, Roster Architect, and Ada Math."""
 
-    def __init__(self) -> None:
+    def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "arthur_system.txt")
+        self.model = model or os.getenv("ARTHUR_MODEL") or "gemini-2.5-pro"
 
     def synthesize(
         self,
@@ -252,7 +261,9 @@ class ArthurAgent:
             f"Return strict JSON matching schema with keys: agent='Arthur', reasoning_2_sentences, top_3_picks, fallback_used=False."
         )
 
-        raw_response = call_llm_api(self.system_prompt, user_prompt, timeout_seconds)
+        raw_response = call_llm_api(
+            self.system_prompt, user_prompt, model=self.model, timeout_seconds=timeout_seconds
+        )
         if raw_response:
             try:
                 data = json.loads(raw_response)
@@ -268,10 +279,15 @@ class ArthurAgent:
 class WarRoomOrchestrator:
     """Orchestrates Fan-Out / Fan-In agent workflow with 5s timeout cap."""
 
-    def __init__(self) -> None:
-        self.marcus = MarcusAgent()
-        self.winston = WinstonAgent()
-        self.arthur = ArthurAgent()
+    def __init__(
+        self,
+        marcus_model: Optional[str] = None,
+        winston_model: Optional[str] = None,
+        arthur_model: Optional[str] = None,
+    ) -> None:
+        self.marcus = MarcusAgent(model=marcus_model)
+        self.winston = WinstonAgent(model=winston_model)
+        self.arthur = ArthurAgent(model=arthur_model)
 
     def should_trigger(self, picks_until_user_turn: int) -> bool:
         """Trigger agent graph when user turn is within 2 picks."""

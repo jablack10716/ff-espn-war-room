@@ -138,3 +138,26 @@ def test_position_aware_agent_fallbacks():
     assert "route-running" in m_wr_eval["upside_sentence"]
     assert "QB anchor" in w_qb_eval["need_sentence"]
     assert "WR starting slot" in w_wr_eval["need_sentence"]
+
+
+def test_agent_model_routing():
+    import os
+    # Default behavior: checks environment or hardcoded default
+    marcus = MarcusAgent()
+    assert marcus.model == os.getenv("MARCUS_MODEL", "gemini-2.5-flash")
+
+    winston = WinstonAgent()
+    assert winston.model == os.getenv("WINSTON_MODEL", "gemini-2.5-flash")
+
+    arthur = ArthurAgent()
+    assert arthur.model == os.getenv("ARTHUR_MODEL", "gemini-2.5-pro")
+
+    # Override via init parameter
+    orchestrator = WarRoomOrchestrator(
+        marcus_model="anthropic/claude-3.5-haiku",
+        winston_model="anthropic/claude-3.5-haiku",
+        arthur_model="anthropic/claude-3.5-sonnet"
+    )
+    assert orchestrator.marcus.model == "anthropic/claude-3.5-haiku"
+    assert orchestrator.winston.model == "anthropic/claude-3.5-haiku"
+    assert orchestrator.arthur.model == "anthropic/claude-3.5-sonnet"

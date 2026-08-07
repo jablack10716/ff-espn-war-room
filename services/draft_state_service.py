@@ -115,7 +115,7 @@ class DraftStateService:
         arthur_gm_reasoning: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Record a new player draft pick event and set player unavailable."""
-        db_source = source if source in ("manual", "system") else "manual"
+        db_source = source if source in ("manual", "system", "import") else "manual"
         db_notes = notes or ("Pre-draft keeper" if source == "keeper" else None)
 
         if picked_by_user or telemetry_data or marcus_pitch or winston_pitch or arthur_gm_reasoning:

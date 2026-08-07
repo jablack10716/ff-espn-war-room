@@ -35,3 +35,11 @@ chrome-debug/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Frontend dependencies and builds
+node_modules/
+.next/
+out/
+client/.next/
+client/node_modules/
+client/out/

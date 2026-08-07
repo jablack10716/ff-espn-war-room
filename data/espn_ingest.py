@@ -772,6 +772,7 @@ def sync_espn_league_data(
     scoring_fmt = "HALF_PPR"
     rows: List[Dict[str, Any]] = []
     used_fallback = False
+    sync_error = None
 
     try:
         league = League(
@@ -798,6 +799,7 @@ def sync_espn_league_data(
         LOGGER.warning("ESPN live API sync failed (%s). Activating offline fallback mechanism.", exc)
         rows = load_fallback_seed_data(Path("data/seed"))
         used_fallback = True
+        sync_error = str(exc)
 
     if use_multi_source and rows:
         try:
@@ -824,6 +826,7 @@ def sync_espn_league_data(
         "scoring_format": scoring_fmt,
         "player_count": len(rows),
         "used_offline_fallback": used_fallback,
+        "error_message": sync_error,
     }
 
 

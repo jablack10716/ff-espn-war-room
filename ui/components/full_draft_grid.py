@@ -131,7 +131,12 @@ def _get_round_and_slot_from_pick_no(p_no: int, num_teams: int, is_3rr: bool) ->
     r = ((p_no - 1) // num_teams) + 1
     p_in_r = (p_no - 1) % num_teams
     if is_3rr:
-        is_even = (r % 2 == 1) if r > 1 else False
+        if r == 1:
+            is_even = False
+        elif r in (2, 3):
+            is_even = True
+        else:
+            is_even = (r % 2 == 1)
     else:
         is_even = (r % 2 == 0)
     s = (num_teams - p_in_r) if is_even else (p_in_r + 1)

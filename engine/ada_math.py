@@ -23,6 +23,16 @@ from engine.tier_cliff import calculate_prv_multiplier
 LOGGER = logging.getLogger("ada_math")
 
 
+INJURY_EGP_MULTIPLIERS: Dict[str, float] = {
+    "ACTIVE": 1.0,
+    "QUESTIONABLE": 0.95,
+    "DOUBTFUL": 0.88,
+    "OUT": 0.82,
+    "IR": 0.70,
+    "PUP": 0.75,
+}
+
+
 def estimate_best_at_next_turn(
     position: str,
     available_players: Sequence[Dict[str, Any]],
@@ -124,26 +134,46 @@ class AdaQuantEngine:
         # Reconstruct team rosters from draft_log
         all_rosters: Dict[int, List[Dict[str, Any]]] = {}
         recent_picks: List[Dict[str, Any]] = []
+        drafted_counts: Dict[str, int] = {}
 
         for event in draft_log:
             if str(event.get("event_type", "PICK")).upper() == "PICK":
                 slot = int(event.get("team_slot", 1))
                 all_rosters.setdefault(slot, []).append(event)
                 recent_picks.append(event)
+                pos_event = str(event.get("position", "")).upper()
+                if pos_event:
+                    drafted_counts[pos_event] = drafted_counts.get(pos_event, 0) + 1
 
         user_roster = all_rosters.get(user_team_slot, [])
 
+        # Apply Expected Games Played (EGP) injury discounting prior to metrics computation
+        candidates_egp: List[Dict[str, Any]] = []
+        for p in candidates:
+            p_copy = dict(p)
+            inj = str(p_copy.get("injury_status") or "ACTIVE").upper()
+            mult = INJURY_EGP_MULTIPLIERS.get(inj, 1.0)
+            raw_proj = float(p_copy.get("projection_median") or 0.0)
+            p_copy["projection_median"] = round(raw_proj * mult, 2)
+            candidates_egp.append(p_copy)
+
         # 1. Compute raw metric values
         raw_metrics: List[Dict[str, float]] = []
-        for player in candidates:
+        for player in candidates_egp:
             pos = str(player.get("position", "")).upper()
 
-            oc_raw = calculate_opportunity_cost_raw(player, candidates, picks_until_next_turn)
-            vor_raw = calculate_vor(player, candidates, roster_requirements, num_teams=num_teams)
+            oc_raw = calculate_opportunity_cost_raw(player, candidates_egp, picks_until_next_turn)
+            vor_raw = calculate_vor(
+                player,
+                candidates_egp,
+                roster_requirements,
+                num_teams=num_teams,
+                drafted_counts=drafted_counts,
+            )
             fcvs_raw = calculate_fcvs_raw(player, current_round)
             hli_raw = calculate_hli_raw(player, user_roster, all_rosters, user_team_slot)
-            prv_mult = calculate_prv_multiplier(pos, candidates, recent_picks)
-            rfit_mult = calculate_roster_fit(player, user_roster, current_round, roster_requirements, available_players=candidates)
+            prv_mult = calculate_prv_multiplier(pos, candidates_egp, recent_picks)
+            rfit_mult = calculate_roster_fit(player, user_roster, current_round, roster_requirements, available_players=candidates_egp)
 
             raw_metrics.append({
                 "oc_raw": oc_raw,
@@ -163,10 +193,14 @@ class AdaQuantEngine:
         vor_values = [m["vor_raw"] for m in raw_metrics]
         vor_norms = z_score_normalize(vor_values)
 
+        # RosterFit: Z-score normalized across all candidates
+        rfit_mults = [m["rfit_mult"] for m in raw_metrics]
+        rfit_norms = z_score_normalize(rfit_mults)
+
         # FCVS: Min-Max normalized by position group
-        fcvs_norms = [0.0] * len(candidates)
+        fcvs_norms = [0.0] * len(candidates_egp)
         by_pos_indices: Dict[str, List[int]] = {}
-        for idx, player in enumerate(candidates):
+        for idx, player in enumerate(candidates_egp):
             pos = str(player.get("position", "")).upper()
             by_pos_indices.setdefault(pos, []).append(idx)
 
@@ -177,8 +211,8 @@ class AdaQuantEngine:
                 fcvs_norms[i] = norm_val
 
         # HLI: Min-Max normalized within RB candidate pool
-        hli_norms = [0.0] * len(candidates)
-        rb_indices = [i for i, p in enumerate(candidates) if str(p.get("position", "")).upper() == "RB"]
+        hli_norms = [0.0] * len(candidates_egp)
+        rb_indices = [i for i, p in enumerate(candidates_egp) if str(p.get("position", "")).upper() == "RB"]
         if rb_indices:
             rb_hli_raws = [raw_metrics[i]["hli_raw"] for i in rb_indices]
             rb_hli_norms = min_max_normalize(rb_hli_raws)
@@ -197,31 +231,25 @@ class AdaQuantEngine:
         base_w_rfit = self.weights.get("w_roster_fit", 0.15)
 
         results: List[Dict[str, Any]] = []
-        for idx, player in enumerate(candidates):
+        for idx, player in enumerate(candidates_egp):
             pos = str(player.get("position", "")).upper()
             oc_n = oc_norms[idx]
             vor_n = vor_norms[idx]
             fcvs_n = fcvs_norms[idx]
             hli_n = hli_norms[idx]
             prv_n = prv_norms[idx]
-            rfit_m = raw_metrics[idx]["rfit_mult"]
+            rfit_n = rfit_norms[idx]
 
-            # For non-RBs, HLI is not applicable -> redistribute w_hli equally to w_oc and w_vor
-            if pos != "RB":
-                w_oc = base_w_oc + (base_w_hli * 0.5)
-                w_vor = base_w_vor + (base_w_hli * 0.5)
-                w_hli = 0.0
-            else:
-                w_oc = base_w_oc
-                w_vor = base_w_vor
-                w_hli = base_w_hli
-
+            # Decouple HLI for non-RBs without inflating w_oc or w_vor
+            w_oc = base_w_oc
+            w_vor = base_w_vor
+            w_hli = base_w_hli if pos == "RB" else 0.0
             w_fcvs = base_w_fcvs
             w_prv = base_w_prv
             w_rfit = base_w_rfit
 
             composite_score = round(
-                w_oc * oc_n + w_vor * vor_n + w_fcvs * fcvs_n + w_hli * hli_n + w_prv * prv_n + w_rfit * rfit_m,
+                w_oc * oc_n + w_vor * vor_n + w_fcvs * fcvs_n + w_hli * hli_n + w_prv * prv_n + w_rfit * rfit_n,
                 4,
             )
 
@@ -251,7 +279,8 @@ class AdaQuantEngine:
                     "hli_norm": round(hli_n, 4),
                     "prv_mult": raw_metrics[idx]["prv_mult"],
                     "prv_norm": round(prv_n, 4),
-                    "roster_fit_mult": rfit_m,
+                    "roster_fit_mult": raw_metrics[idx]["rfit_mult"],
+                    "rfit_norm": round(rfit_n, 4),
                 },
             })
 

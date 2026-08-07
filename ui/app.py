@@ -78,14 +78,17 @@ def init_session_state() -> None:
         st.session_state.keeper_expander_open = False
 
 
+@st.cache_resource
+def get_cached_draft_state_service() -> DraftStateService:
+    """Return a singleton DraftStateService instance across Streamlit reruns."""
+    return DraftStateService(use_supabase=True)
+
+
 def main() -> None:
     init_session_state()
 
-    # Instantiate draft state service early for sidebar components
-    import importlib
-    import services.draft_state_service as dss_mod
-    importlib.reload(dss_mod)
-    service = dss_mod.DraftStateService(use_supabase=True)
+    # Instantiate cached draft state service singleton
+    service = get_cached_draft_state_service()
     available_players, draft_log = service.reconcile_state(st.session_state.draft_id)
 
     # Callback handlers defined early for sidebar & board access
@@ -710,10 +713,7 @@ def main() -> None:
             )
 
     with tab_full_grid:
-        import importlib
-        import ui.components.full_draft_grid as fg_mod
-        importlib.reload(fg_mod)
-        fg_mod.render_full_draft_grid(
+        render_full_draft_grid(
             draft_log=draft_log,
             available_players=available_players,
             on_record_pick=handle_record_pick,

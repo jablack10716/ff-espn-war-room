@@ -64,12 +64,8 @@ def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
     floor_val = float(floor) if floor is not None else max(0.0, median * 0.85)
     ceiling_val = float(ceiling) if ceiling is not None else max(median, median * 1.15)
 
-    if round_no <= 5:
-        w_floor, w_ceiling = 0.80, 0.20
-    elif round_no <= 9:
-        w_floor, w_ceiling = 0.50, 0.50
-    else:
-        w_floor, w_ceiling = 0.10, 0.90
+    w_floor = max(0.10, round(0.90 - 0.08 * (round_no - 1), 4))
+    w_ceiling = round(1.0 - w_floor, 4)
 
     return round(w_floor * floor_val + w_ceiling * ceiling_val, 4)
 
@@ -324,6 +320,7 @@ def calculate_vor(
     available_players: Sequence[Dict[str, Any]],
     roster_requirements: Optional[Dict[str, int]] = None,
     num_teams: int = 12,
+    drafted_counts: Optional[Dict[str, int]] = None,
 ) -> float:
     """Calculate Value Over Replacement (VOR/VORP) for a candidate player.
 
@@ -348,7 +345,13 @@ def calculate_vor(
     # Use effective starters (accounts for FLEX/SUPERFLEX distribution)
     effective = calculate_effective_starters(roster_requirements)
     starters = effective.get(pos, roster_requirements.get(pos, 1))
-    replacement_index = int(round(num_teams * starters))  # 0-indexed
+    total_starters_needed = int(round(num_teams * starters))
+
+    # Adjust replacement index for players already drafted at this position
+    drafted_at_pos = 0
+    if drafted_counts:
+        drafted_at_pos = drafted_counts.get(pos, 0)
+    replacement_index = max(0, total_starters_needed - drafted_at_pos)  # 0-indexed
 
     pos_players = [
         p for p in available_players

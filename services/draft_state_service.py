@@ -7,6 +7,7 @@ and atomic Undo Last Pick transactions via Supabase client.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,14 +21,16 @@ class DraftStateService:
 
     def __init__(self, use_supabase: bool = True) -> None:
         self.use_supabase = use_supabase
+        self._lock = threading.Lock()
         self._local_available_players: Dict[str, Dict[str, Any]] = {}
         self._local_draft_log: Dict[str, List[Dict[str, Any]]] = {}
 
     def set_local_players(self, draft_id: str, players: List[Dict[str, Any]]) -> None:
         """Seed or override local player cache for draft_id."""
-        for p in players:
-            pid = str(p.get("player_id"))
-            self._local_available_players[pid] = dict(p)
+        with self._lock:
+            for p in players:
+                pid = str(p.get("player_id"))
+                self._local_available_players[pid] = dict(p)
 
     def get_available_players(self, draft_id: str) -> List[Dict[str, Any]]:
         """Fetch all available players for draft state."""
@@ -46,7 +49,8 @@ class DraftStateService:
                 LOGGER.warning("Supabase get_available_players failed: %s", exc)
 
         # Fallback to local memory cache
-        return [p for p in self._local_available_players.values() if p.get("is_available", True)]
+        with self._lock:
+            return [dict(p) for p in self._local_available_players.values() if p.get("is_available", True)]
 
     def get_draft_log(self, draft_id: str) -> List[Dict[str, Any]]:
         """Fetch full draft event log ordered by pick_no ASC (deduplicated by pick_no)."""
@@ -72,17 +76,18 @@ class DraftStateService:
             except Exception as exc:
                 LOGGER.warning("Supabase get_draft_log failed: %s", exc)
 
-        local_entries = self._local_draft_log.get(draft_id, [])
-        local_by_pick: Dict[int, Dict[str, Any]] = {}
-        for entry in local_entries:
-            p_no = entry.get("pick_no")
-            if p_no is not None:
-                local_by_pick[int(p_no)] = entry
+        with self._lock:
+            local_entries = list(self._local_draft_log.get(draft_id, []))
+            local_by_pick: Dict[int, Dict[str, Any]] = {}
+            for entry in local_entries:
+                p_no = entry.get("pick_no")
+                if p_no is not None:
+                    local_by_pick[int(p_no)] = entry
 
-        return sorted(
-            list(local_by_pick.values()),
-            key=lambda x: int(x.get("pick_no", 0)),
-        )
+            return sorted(
+                list(local_by_pick.values()),
+                key=lambda x: int(x.get("pick_no", 0)),
+            )
 
     def record_pick(
         self,

@@ -121,3 +121,22 @@ def test_vor_superflex_doubles_qb_baseline():
     assert vor_standard == 60.0
     assert vor_sf == 120.0
     assert vor_sf > vor_standard  # Superflex dramatically increases QB value
+
+
+def test_vor_drafted_counts_adjustment():
+    """Verify that VOR adjusts replacement index down when QBs have already been drafted."""
+    qbs = [
+        {"player_id": f"qb{i}", "position": "QB", "projection_median": 400.0 - (i * 5), "is_available": True}
+        for i in range(20)
+    ]
+    standard_req = {"QB": 1}
+
+    # No QBs drafted yet: baseline is 12th QB remaining (index 12, proj = 340, VOR = 60)
+    vor_initial = calculate_vor(qbs[0], qbs, standard_req, num_teams=12, drafted_counts={"QB": 0})
+    assert vor_initial == 60.0
+
+    # 5 QBs already drafted: baseline should adjust to 12 - 5 = 7th QB remaining (index 7, proj = 365, VOR = 35)
+    vor_with_drafted = calculate_vor(qbs[0], qbs, standard_req, num_teams=12, drafted_counts={"QB": 5})
+    assert vor_with_drafted == 35.0
+    assert vor_with_drafted < vor_initial
+

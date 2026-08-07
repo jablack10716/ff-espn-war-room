@@ -35,7 +35,12 @@ def render_draft_board(
     pick_in_round = (current_pick - 1) % num_teams
 
     if is_3rr:
-        is_even_round = (calc_round % 2 == 1) if calc_round > 1 else False
+        if calc_round == 1:
+            is_even_round = False
+        elif calc_round in (2, 3):
+            is_even_round = True
+        else:
+            is_even_round = (calc_round % 2 == 1)
     else:
         is_even_round = (calc_round % 2 == 0)
 

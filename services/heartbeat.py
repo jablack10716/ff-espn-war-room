@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 from services.supabase_client import get_supabase_client
 

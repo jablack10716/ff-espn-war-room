@@ -63,13 +63,32 @@ def validate_schema(data: Dict[str, Any], schema_name: str) -> bool:
         return False
 
 
+try:
+    from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+
+
+def _execute_llm_request(url: str, headers: dict, payload: dict, timeout_seconds: float) -> str:
+    response = requests.post(url, headers=headers, json=payload, timeout=timeout_seconds)
+    if response.status_code == 429:
+        raise RuntimeError("LLM API Rate Limited (HTTP 429)")
+    response.raise_for_status()
+    res_json = response.json()
+    choices = res_json.get("choices", [])
+    if choices:
+        return choices[0].get("message", {}).get("content", "")
+    return ""
+
+
 def call_llm_api(
     system_prompt: str,
     user_prompt: str,
     model: Optional[str] = None,
     timeout_seconds: float = 5.0,
 ) -> Optional[str]:
-    """Call Google Gemini LLM API with strict timeout."""
+    """Call Google Gemini LLM API with strict timeout and exponential retry resilience."""
     load_dotenv()
     api_key = os.getenv("GEMINI_API_KEY")
 
@@ -97,12 +116,18 @@ def call_llm_api(
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=timeout_seconds)
-        if response.status_code == 200:
-            res_json = response.json()
-            choices = res_json.get("choices", [])
-            if choices:
-                return choices[0].get("message", {}).get("content", "")
+        if TENACITY_AVAILABLE:
+            @retry(
+                reraise=True,
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=0.5, min=0.5, max=3.0),
+                retry=retry_if_exception_type(Exception),
+            )
+            def _with_retry():
+                return _execute_llm_request(url, headers, payload, timeout_seconds)
+            return _with_retry()
+        else:
+            return _execute_llm_request(url, headers, payload, timeout_seconds)
     except Exception as exc:
         LOGGER.warning("LLM API call failed or timed out: %s", exc)
 

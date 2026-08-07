@@ -1,4 +1,4 @@
-# Fantasy Football AI War Room - Master To-Do Checklist
+# The Best Damn Fantasy Football Drafting App - Master To-Do Checklist
 
 Use this checklist to track phase completion across all phases and enhancement sprints of the project.
 

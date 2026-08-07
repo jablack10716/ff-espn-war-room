@@ -13,6 +13,7 @@ def render_draft_board(
     on_record_pick: Callable[[int, int, int, str, str, str, bool], None],
     on_undo_last_pick: Callable[[], None],
     current_pick: int = 1,
+    user_team_slot: int = 1,
     num_teams: int = 12,
     is_mock_mode: bool = False,
     is_3rr: bool = False,
@@ -40,6 +41,9 @@ def render_draft_board(
 
     calc_slot = (num_teams - pick_in_round) if is_even_round else (pick_in_round + 1)
 
+    # Automatically infer if current pick is user's turn
+    picked_by_user = (calc_slot == user_team_slot)
+
     # Map team_slot to team_name if available
     teams_map: Dict[int, str] = {}
     if espn_teams:
@@ -54,6 +58,11 @@ def render_draft_board(
     with col_input:
         st.markdown(f"**Current Pick**: #{current_pick} (Round {calc_round}, {current_team_name})")
 
+        if picked_by_user:
+            st.caption("⭐ **YOUR TURN**: Pick will be automatically added to your roster.")
+        else:
+            st.caption(f"👤 **Opponent Pick**: Assigned to {current_team_name}.")
+
         # Player search dropdown
         player_options = {
             f"{p.get('full_name')} ({p.get('position')} - {p.get('team', 'FA')})": p
@@ -65,8 +74,6 @@ def render_draft_board(
             options=["-- Select Player --"] + list(player_options.keys()),
             key=f"searchbox_pick_{current_pick}",
         )
-
-        picked_by_user = st.checkbox("Picked by You", value=False, key=f"user_pick_cb_{current_pick}")
 
         if st.button("Log Pick", type="primary", use_container_width=True):
             if selected_label and selected_label != "-- Select Player --":
@@ -87,6 +94,10 @@ def render_draft_board(
         if st.button("⏪ Undo Last Pick", use_container_width=True):
             on_undo_last_pick()
 
+        if st.button("🗑️ Reset / Clear Draft", use_container_width=True):
+            if on_reset_draft:
+                on_reset_draft()
+
         if is_mock_mode:
             st.markdown("---")
             st.markdown("**Mock Simulator Controls**")
@@ -98,10 +109,6 @@ def render_draft_board(
             if st.button("⏩ Auto-Simulate to My Turn", use_container_width=True):
                 if on_simulate_to_user_turn:
                     on_simulate_to_user_turn()
-
-            if st.button("🗑️ Reset Mock Draft", use_container_width=True):
-                if on_reset_draft:
-                    on_reset_draft()
 
     st.markdown("---")
     st.markdown("### Recent Picks Log")

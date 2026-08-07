@@ -75,44 +75,49 @@ def render_keeper_manager(
         label = f"{pname} ({pos} - {team})"
         player_options[label] = p
 
-    selected_player_label = st.selectbox(
-        "Select Keeper Player:",
-        options=["-- Select Keeper --"] + sorted(list(player_options.keys())),
-        key="keeper_player_selectbox",
-    )
+    with st.form(key="keeper_entry_form", clear_on_submit=False):
+        selected_player_label = st.selectbox(
+            "Select Keeper Player:",
+            options=["-- Select Keeper --"] + sorted(list(player_options.keys())),
+            key="keeper_player_selectbox",
+        )
 
-    selected_team_label = st.selectbox(
-        "Assign to Team:",
-        options=list(team_options.keys()),
-        key="keeper_team_selectbox",
-    )
+        selected_team_label = st.selectbox(
+            "Assign to Team:",
+            options=list(team_options.keys()),
+            key="keeper_team_selectbox",
+        )
 
-    keeper_round = st.number_input(
-        "Keeper Round:",
-        min_value=1,
-        max_value=25,
-        value=1,
-        step=1,
-        key="keeper_round_number",
-    )
+        keeper_round = st.number_input(
+            "Keeper Round:",
+            min_value=1,
+            max_value=25,
+            value=1,
+            step=1,
+            key="keeper_round_number",
+        )
 
-    assigned_slot = team_options.get(selected_team_label, 1)
-    calc_pick_no = calculate_keeper_pick_no(
-        round_no=int(keeper_round),
-        team_slot=assigned_slot,
-        num_teams=num_teams,
-        is_3rr=is_3rr,
-    )
+        assigned_slot = team_options.get(selected_team_label, 1)
+        calc_pick_no = calculate_keeper_pick_no(
+            round_no=int(keeper_round),
+            team_slot=assigned_slot,
+            num_teams=num_teams,
+            is_3rr=is_3rr,
+        )
 
-    team_display_name = team_names_map.get(assigned_slot, f"Team Slot {assigned_slot}")
-    st.info(
-        f"📍 Draft Pick: **#{calc_pick_no}** (Round {keeper_round}, {team_display_name})"
-    )
+        team_display_name = team_names_map.get(assigned_slot, f"Team Slot {assigned_slot}")
+        st.info(
+            f"📍 Estimated Draft Pick: **#{calc_pick_no}** (Round {keeper_round}, {team_display_name})"
+        )
 
-    # Automatically infer if this is user's team keeper
-    picked_by_user = (assigned_slot == user_team_slot)
+        # Automatically infer if this is user's team keeper
+        picked_by_user = (assigned_slot == user_team_slot)
 
-    if st.button("🔒 Lock in Keeper", type="primary", use_container_width=True):
+        st.caption("👇 Click below to save & lock this keeper onto the draft board:")
+        submitted = st.form_submit_button("🔒 Lock in Keeper", type="primary", use_container_width=True)
+
+    if submitted:
+        st.session_state.keeper_expander_open = True
         if selected_player_label and selected_player_label != "-- Select Keeper --":
             player = player_options[selected_player_label]
             player_name = player.get("full_name") or player.get("player_name") or "Unknown"
@@ -162,5 +167,6 @@ def render_keeper_manager(
         st.dataframe(keeper_rows, use_container_width=True)
 
         if st.button("⏪ Undo Last Keeper", use_container_width=True):
+            st.session_state.keeper_expander_open = True
             if on_undo_keeper:
                 on_undo_keeper()

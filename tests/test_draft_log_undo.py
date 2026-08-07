@@ -83,3 +83,30 @@ def test_atomic_undo_restores_availability(draft_service):
 def test_undo_on_empty_log_returns_none(draft_service):
     undone = draft_service.undo_last_pick("non_existent_draft")
     assert undone is None
+
+
+def test_delete_specific_pick_vacates_slot(draft_service):
+    draft_id = "test_draft"
+
+    # Record 3 picks
+    draft_service.record_pick(draft_id, 1, 1, 1, "p1", "Patrick Mahomes", "QB")
+    draft_service.record_pick(draft_id, 2, 1, 2, "p2", "Christian McCaffrey", "RB")
+    draft_service.record_pick(draft_id, 3, 1, 3, "p3", "CeeDee Lamb", "WR")
+
+    assert len(draft_service.get_available_players(draft_id)) == 0
+
+    # Delete historical pick #2 specifically (vacating McCaffrey)
+    deleted = draft_service.delete_specific_pick(draft_id, 2)
+    assert deleted is not None
+    assert deleted["player_id"] == "p2"
+
+    # McCaffrey is restored to available pool
+    avail = draft_service.get_available_players(draft_id)
+    assert len(avail) == 1
+    assert avail[0]["player_id"] == "p2"
+
+    # Log now has picks #1 and #3, but #2 is gone
+    log = draft_service.get_draft_log(draft_id)
+    assert len(log) == 2
+    assert set(p["pick_no"] for p in log) == {1, 3}
+

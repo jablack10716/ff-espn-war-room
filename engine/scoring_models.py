@@ -381,9 +381,15 @@ def apply_ppr_adjustment(
     if fmt == "STANDARD":
         return 0.0
 
-    pos = str(player.get("position", "")).upper()
     is_full = (fmt == "PPR")
+    ppr_multiplier = 1.0 if is_full else 0.5
 
+    # Check for dynamic projected_receptions
+    proj_rec = player.get("projected_receptions")
+    if proj_rec is not None and float(proj_rec) > 0:
+        return round(float(proj_rec) * ppr_multiplier, 2)
+
+    pos = str(player.get("position", "")).upper()
     if pos == "WR":
         return 85.0 if is_full else 42.5
     elif pos == "TE":
@@ -392,3 +398,4 @@ def apply_ppr_adjustment(
         return 40.0 if is_full else 20.0
 
     return 0.0
+

@@ -1,4 +1,4 @@
-# Fantasy Football AI War Room - Root SSOT Specification
+# The Best Damn Fantasy Football Drafting App - Root SSOT Specification
 
 Status: Execution Mode (Phase 1 in progress)
 Owner: Product/Engineering

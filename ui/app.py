@@ -1,4 +1,4 @@
-"""Main Streamlit Application for Fantasy Football AI War Room.
+"""Main Streamlit Application for The Best Damn Fantasy Football Drafting App.
 
 Integrates Ada quantitative recommendation engine, real-time draft log tracking,
 and atomic Undo Last Pick actions across isolated @st.fragment blocks.
@@ -23,6 +23,7 @@ load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 import streamlit as st
 
 from engine.ada_math import AdaQuantEngine
+from services.action_logger import log_action
 from services.draft_state_service import DraftStateService
 from services.heartbeat import HeartbeatWorker
 from services.realtime_listener import RealtimeListener
@@ -36,7 +37,7 @@ logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger("war_room_app")
 
 st.set_page_config(
-    page_title="Fantasy Football AI War Room",
+    page_title="The Best Damn Fantasy Football Drafting App",
     page_icon="🏈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -73,13 +74,18 @@ def init_session_state() -> None:
         st.session_state.heartbeat_healthy = True
     if "fallback_mode" not in st.session_state:
         st.session_state.fallback_mode = False
+    if "keeper_expander_open" not in st.session_state:
+        st.session_state.keeper_expander_open = False
 
 
 def main() -> None:
     init_session_state()
 
     # Instantiate draft state service early for sidebar components
-    service = DraftStateService(use_supabase=True)
+    import importlib
+    import services.draft_state_service as dss_mod
+    importlib.reload(dss_mod)
+    service = dss_mod.DraftStateService(use_supabase=True)
     available_players, draft_log = service.reconcile_state(st.session_state.draft_id)
 
     # Callback handlers defined early for sidebar & board access
@@ -92,6 +98,10 @@ def main() -> None:
         position: str,
         picked_by_user: bool,
     ) -> None:
+        st.session_state["active_grid_pick_no"] = None
+        st.session_state["fallback_active_grid_pick_no"] = None
+        st.session_state["grid_dialog_force_close_once"] = True
+
         team_name = None
         if st.session_state.espn_teams:
             for t in st.session_state.espn_teams:
@@ -99,17 +109,59 @@ def main() -> None:
                     team_name = t.get("team_name")
                     break
 
-        service.record_pick(
-            draft_id=st.session_state.draft_id,
-            pick_no=pick_no,
-            round_no=round_no,
-            team_slot=team_slot,
-            player_id=player_id,
-            player_name=player_name,
-            position=position,
-            team_name=team_name,
-            picked_by_user=picked_by_user,
+        log_action(
+            "RECORD_PICK",
+            f"Recording pick #{pick_no} for player '{player_name}'",
+            {
+                "draft_id": st.session_state.draft_id,
+                "pick_no": pick_no,
+                "round_no": round_no,
+                "team_slot": team_slot,
+                "player_id": player_id,
+                "player_name": player_name,
+                "position": position,
+                "picked_by_user": picked_by_user,
+            },
         )
+
+        try:
+            upsert_pick = getattr(service, "upsert_pick", None)
+            if callable(upsert_pick):
+                upsert_pick(
+                    draft_id=st.session_state.draft_id,
+                    pick_no=pick_no,
+                    round_no=round_no,
+                    team_slot=team_slot,
+                    player_id=player_id,
+                    player_name=player_name,
+                    position=position,
+                    team_name=team_name,
+                    picked_by_user=picked_by_user,
+                )
+            else:
+                LOGGER.warning("DraftStateService.upsert_pick unavailable at runtime; falling back to record_pick")
+                service.record_pick(
+                    draft_id=st.session_state.draft_id,
+                    pick_no=pick_no,
+                    round_no=round_no,
+                    team_slot=team_slot,
+                    player_id=player_id,
+                    player_name=player_name,
+                    position=position,
+                    team_name=team_name,
+                    picked_by_user=picked_by_user,
+                )
+            st.session_state.flash_notification = (
+                "success",
+                f"✅ Logged pick #{pick_no}: **{player_name}** ({position}) to {team_name or f'Slot {team_slot}'}!"
+            )
+            log_action("RECORD_PICK_SUCCESS", f"Pick #{pick_no} successfully saved.")
+        except Exception as exc:
+            st.session_state.flash_notification = (
+                "error",
+                f"❌ Failed to save pick #{pick_no}. {exc}"
+            )
+            log_action("RECORD_PICK_ERROR", f"Failed to save pick #{pick_no}", {"error": str(exc)})
         st.rerun()
 
     def handle_record_keeper(
@@ -122,6 +174,7 @@ def main() -> None:
         team_name: str,
         picked_by_user: bool,
     ) -> None:
+        log_action("RECORD_KEEPER", f"Locking keeper #{pick_no}: {player_name}")
         service.record_pick(
             draft_id=st.session_state.draft_id,
             pick_no=pick_no,
@@ -135,26 +188,91 @@ def main() -> None:
             source="keeper",
             notes="Pre-draft keeper",
         )
+        st.session_state.flash_notification = (
+            "success",
+            f"🔒 Keeper Locked: **{player_name}** ({position}) assigned to {team_name} at Pick #{pick_no}!"
+        )
         st.rerun()
 
     def handle_undo_last_pick() -> None:
+        log_action("UNDO_LAST_PICK", "Undoing last pick")
         undone = service.undo_last_pick(st.session_state.draft_id)
         if undone:
-            st.toast(f"Undone pick #{undone.get('pick_no')}: {undone.get('player_name')}")
+            st.session_state.flash_notification = (
+                "info",
+                f"⏪ Undone pick #{undone.get('pick_no')}: **{undone.get('player_name')}** restored to available pool."
+            )
+            log_action("UNDO_LAST_PICK_SUCCESS", f"Undone pick #{undone.get('pick_no')}")
         else:
-            st.toast("No active pick events to undo.")
+            st.session_state.flash_notification = ("info", "ℹ️ No active pick events to undo.")
+            log_action("UNDO_LAST_PICK_EMPTY", "No picks to undo")
+        st.rerun()
+
+    def handle_delete_specific_pick(pick_no: int) -> None:
+        st.session_state["active_grid_pick_no"] = None
+        st.session_state["fallback_active_grid_pick_no"] = None
+        st.session_state["grid_dialog_force_close_once"] = True
+
+        log_action("DELETE_SPECIFIC_PICK", f"Deleting pick #{pick_no}")
+        deleted = service.delete_specific_pick(st.session_state.draft_id, pick_no)
+        if deleted:
+            st.session_state.flash_notification = (
+                "success",
+                f"🗑️ Cleared Pick #{pick_no}: **{deleted.get('player_name')}** restored to available pool."
+            )
+            log_action("DELETE_SPECIFIC_PICK_SUCCESS", f"Cleared Pick #{pick_no}")
+        else:
+            st.session_state.flash_notification = ("info", f"ℹ️ No pick found at #{pick_no} to clear.")
+            log_action("DELETE_SPECIFIC_PICK_EMPTY", f"No pick found at #{pick_no}")
         st.rerun()
 
     def handle_reset_draft() -> None:
         service.reset_draft(st.session_state.draft_id)
-        st.toast("Reset draft state successfully.")
+        st.session_state.flash_notification = (
+            "success",
+            f"🗑️ Draft '{st.session_state.draft_id}' cleared! All logged picks deleted and players restored to available pool."
+        )
         st.rerun()
 
-    st.title("🏈 Fantasy Football AI War Room")
+    if hasattr(st, "dialog"):
+        @st.dialog("⚠️ Confirm Reset Draft")
+        def confirm_reset_dialog() -> None:
+            st.warning(
+                f"⚠️ **Are you sure you want to reset draft '{st.session_state.draft_id}'?**\n\n"
+                f"This will permanently delete **ALL logged picks and keepers** and restore all players to the available draft pool."
+            )
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🚨 Yes, Clear Everything", type="primary", use_container_width=True):
+                    st.session_state["show_reset_confirm"] = False
+                    handle_reset_draft()
+            with c2:
+                if st.button("❌ Cancel", use_container_width=True):
+                    st.session_state["show_reset_confirm"] = False
+                    st.rerun()
+
+    def request_reset_confirmation() -> None:
+        st.session_state["show_reset_confirm"] = True
+
+    st.title("🏈 The Best Damn Fantasy Football Drafting App")
     st.caption("Live Draft Assistant | Ada Quant Engine Active")
+
+    # Render Reset Confirmation Modal if triggered
+    if st.session_state.get("show_reset_confirm"):
+        if hasattr(st, "dialog"):
+            confirm_reset_dialog()
+
+    # Render Flash Notification Toast if present (Option A: Single lightweight toast)
+    if st.session_state.get("flash_notification"):
+        ntype, msg = st.session_state.flash_notification
+        icon_map = {"success": "✅", "info": "ℹ️", "error": "⚠️"}
+        st.toast(msg, icon=icon_map.get(ntype, "ℹ️"))
+        st.session_state.flash_notification = None
 
     # Sidebar settings
     with st.sidebar:
+        st.markdown("### 🏈 The Best Damn Fantasy Football Drafting App")
+        st.markdown("---")
         st.header("⚙️ Draft Settings")
         mode = st.radio(
             "Select Mode:",
@@ -169,18 +287,31 @@ def main() -> None:
         else:
             st.session_state.draft_id = st.text_input("Live Draft ID", value="live_draft_2026")
 
+        if st.button("🗑️ Reset / Clear Draft Picks", use_container_width=True, help="Deletes all logged picks and restores all players to available state."):
+            request_reset_confirmation()
+            st.rerun()
+
         st.markdown("---")
-        st.subheader("🏈 ESPN League Sync")
+        st.subheader("🌐 Multi-Source Data Sync")
+        st.caption("Blends ESPN, Sleeper ADP, FantasyPros ECR & Dynamic Depth Charts")
+
         espn_league_id = st.text_input("ESPN League ID", value=os.getenv("ESPN_LEAGUE_ID", ""))
         espn_year = st.number_input("Season Year", value=int(os.getenv("ESPN_SEASON_YEAR", "2026")))
         espn_s2 = os.getenv("ESPN_S2_COOKIE", "")
         espn_swid = os.getenv("ESPN_SWID_COOKIE", "")
 
-        if st.button("🔄 Sync ESPN League & Players", use_container_width=True):
-            if not espn_league_id or not espn_s2 or not espn_swid:
-                st.error("Please ensure ESPN credentials are in `.env` or provided above.")
+        use_multi_source = st.checkbox("Enable Multi-Source Blending (Sleeper + FantasyPros)", value=True)
+
+        with st.expander("⚖️ Projection Blend Weights"):
+            fp_weight = st.slider("FantasyPros ECR Weight", 0.0, 1.0, 0.50, 0.05)
+            sleeper_weight = st.slider("Sleeper ADP Weight", 0.0, 1.0, 0.25, 0.05)
+            espn_weight = st.slider("ESPN Projection Weight", 0.0, 1.0, 0.25, 0.05)
+
+        if st.button("🔄 Sync Multi-Source Data & Players", use_container_width=True):
+            if not espn_league_id:
+                st.error("Please provide your ESPN League ID above or in `.env`.")
             else:
-                with st.spinner("Connecting to ESPN & updating database..."):
+                with st.spinner("Connecting to ESPN, Sleeper, and FantasyPros..."):
                     try:
                         from data.espn_ingest import sync_espn_league_data, fetch_espn_roster_and_scoring
                         res = sync_espn_league_data(
@@ -189,6 +320,7 @@ def main() -> None:
                             espn_s2=espn_s2,
                             swid=espn_swid,
                             upsert_supabase=True,
+                            use_multi_source=use_multi_source,
                         )
                         st.session_state.espn_teams = res["teams"]
                         st.session_state.num_teams = len(res["teams"]) if res["teams"] else st.session_state.num_teams
@@ -211,10 +343,17 @@ def main() -> None:
                         if api_settings.get("total_rounds"):
                             st.session_state.total_rounds = api_settings["total_rounds"]
 
-                        st.success(f"Synced {res['player_count']} players & {len(res['teams'])} teams from ESPN!")
-                        st.caption(f"Scoring: **{st.session_state.scoring_format}** | Roster: {st.session_state.roster_requirements}")
+                        if res.get("used_offline_fallback"):
+                            st.warning("⚠️ Live API connection failed. Loaded offline seed data as fallback.")
+                        else:
+                            st.success(f"Synced {res['player_count']} players across active sources!")
+                        
+                        st.caption(
+                            f"🟢 **Sources Active**: ESPN | Sleeper API | FantasyPros ECR\n\n"
+                            f"Scoring: **{st.session_state.scoring_format}** | Roster: {st.session_state.roster_requirements}"
+                        )
                     except Exception as exc:
-                        st.error(f"ESPN Sync failed: {exc}")
+                        st.error(f"Multi-Source Sync failed: {exc}")
 
         # Team Selection
         if st.session_state.espn_teams:
@@ -259,7 +398,7 @@ def main() -> None:
                 st.session_state.espn_teams = sorted(st.session_state.espn_teams, key=lambda x: int(x["team_slot"]))
 
         # Pre-Draft Keepers Manager
-        with st.expander("📌 Pre-Draft Keepers"):
+        with st.expander("📌 Pre-Draft Keepers", expanded=st.session_state.get("keeper_expander_open", False)):
             render_keeper_manager(
                 available_players=available_players,
                 draft_log=draft_log,
@@ -412,9 +551,7 @@ def main() -> None:
         for e in draft_log
         if str(e.get("event_type", "PICK")).upper() == "PICK" and e.get("pick_no") is not None
     }
-    current_pick = 1
-    while current_pick in taken_pick_nos:
-        current_pick += 1
+    current_pick = max(taken_pick_nos) + 1 if taken_pick_nos else 1
 
     current_round = ((current_pick - 1) // st.session_state.num_teams) + 1
 
@@ -460,21 +597,36 @@ def main() -> None:
         st.rerun()
 
     def handle_simulate_to_user_turn() -> None:
-        max_picks = 200
+        max_picks = 250
         cur_p = current_pick
+        simulated_count = 0
+        simulated_names = []
         while cur_p < max_picks:
             c_slot = get_slot_for_pick(cur_p)
-            if c_slot == st.session_state.user_team_slot:
+            if c_slot == st.session_state.user_team_slot and simulated_count > 0:
                 break
             c_round = ((cur_p - 1) // st.session_state.num_teams) + 1
-            service.simulate_opponent_pick(
+            simmed = service.simulate_opponent_pick(
                 draft_id=st.session_state.draft_id,
                 pick_no=cur_p,
                 round_no=c_round,
                 team_slot=c_slot,
             )
+            if simmed:
+                simulated_count += 1
+                simulated_names.append(f"#{cur_p} {simmed.get('player_name')} ({simmed.get('position')})")
             cur_p += 1
-        st.toast(f"Simulated picks up to your turn at Pick #{cur_p}!")
+            # Break after simulating up to user's next turn
+            if get_slot_for_pick(cur_p) == st.session_state.user_team_slot:
+                break
+
+        if simulated_count > 0:
+            summary_str = ", ".join(simulated_names[:3])
+            if len(simulated_names) > 3:
+                summary_str += f" (+{len(simulated_names)-3} more)"
+            st.toast(f"🤖 Auto-picked {simulated_count} opponent(s): {summary_str}. Now on the clock at Pick #{cur_p}!", icon="🎯")
+        else:
+            st.toast(f"It's already your turn at Pick #{current_pick}!", icon="ℹ️")
         st.rerun()
 
     def handle_reset_draft() -> None:
@@ -484,12 +636,31 @@ def main() -> None:
 
     from ui.components.my_roster import render_my_roster
 
-    # Main Page Tabs: Live War Room | Full Draft Board Grid
-    tab_war_room, tab_full_grid = st.tabs(["🎯 Live War Room", "📊 Full Draft Board Grid"])
+    # Render Mock Draft Control Bar if in Practice Mode
+    if st.session_state.draft_mode == "🧪 Practice Mock Draft":
+        with st.container(border=True):
+            st.markdown(
+                f"🧪 **Mock Practice Control Bar** — Current Pick: **#{current_pick}** "
+                f"(Round {current_round}, Slot {get_slot_for_pick(current_pick)})"
+            )
+            m_col1, m_col2, m_col3 = st.columns([3, 2, 2])
+            with m_col1:
+                if st.button("⏩ Auto-Pick All Opponents Until My Turn", type="primary", use_container_width=True, key="mock_banner_auto_pick"):
+                    handle_simulate_to_user_turn()
+            with m_col2:
+                if st.button("🤖 Simulate 1 Bot Pick", use_container_width=True, key="mock_banner_single_pick"):
+                    handle_simulate_pick()
+            with m_col3:
+                if st.button("🗑️ Reset Mock Draft", use_container_width=True, key="mock_banner_reset"):
+                    request_reset_confirmation()
+                    st.rerun()
+
+    # Main Page Tabs: Live War Room | Full Draft Board Grid | My Roster
+    tab_war_room, tab_full_grid, tab_roster = st.tabs(["🎯 Live War Room", "📊 Full Draft Board Grid", "📋 My Roster"])
 
     with tab_war_room:
-        # Layout: Recommendations | My Roster | Draft Board
-        col_recs, col_roster, col_board = st.columns([2, 1, 2])
+        # Layout: Recommendations | Draft Board
+        col_recs, col_board = st.columns([3, 2])
 
         with col_recs:
             # Compute Ada rankings
@@ -519,12 +690,7 @@ def main() -> None:
 
             render_recommendations(rankings, agent_payload=agent_payload, user_roster=user_roster, top_n=5)
 
-        with col_roster:
-            render_my_roster(
-                draft_log=draft_log,
-                user_team_slot=st.session_state.user_team_slot,
-                roster_requirements=st.session_state.roster_requirements,
-            )
+
 
         with col_board:
             render_draft_board(
@@ -533,22 +699,37 @@ def main() -> None:
                 on_record_pick=handle_record_pick,
                 on_undo_last_pick=handle_undo_last_pick,
                 current_pick=current_pick,
+                user_team_slot=st.session_state.user_team_slot,
                 num_teams=st.session_state.num_teams,
                 is_mock_mode=(st.session_state.draft_mode == "🧪 Practice Mock Draft"),
                 is_3rr=st.session_state.is_3rr,
                 espn_teams=st.session_state.espn_teams,
                 on_simulate_pick=handle_simulate_pick,
                 on_simulate_to_user_turn=handle_simulate_to_user_turn,
-                on_reset_draft=handle_reset_draft,
+                on_reset_draft=request_reset_confirmation,
             )
 
     with tab_full_grid:
-        render_full_draft_grid(
+        import importlib
+        import ui.components.full_draft_grid as fg_mod
+        importlib.reload(fg_mod)
+        fg_mod.render_full_draft_grid(
             draft_log=draft_log,
+            available_players=available_players,
+            on_record_pick=handle_record_pick,
+            on_delete_specific_pick=handle_delete_specific_pick,
+            user_team_slot=st.session_state.user_team_slot,
             espn_teams=st.session_state.espn_teams,
             num_teams=st.session_state.num_teams,
             is_3rr=st.session_state.is_3rr,
             total_rounds=st.session_state.total_rounds,
+        )
+
+    with tab_roster:
+        render_my_roster(
+            draft_log=draft_log,
+            user_team_slot=st.session_state.user_team_slot,
+            roster_requirements=st.session_state.roster_requirements,
         )
 
 

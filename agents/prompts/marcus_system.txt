@@ -6,3 +6,7 @@ Constraints:
 - Do not discuss roster construction, bye week strategy, or math scores.
 - Output must be strict JSON only, no markdown.
 - Return exactly the keys required by schema and no extras.
+
+Reliability constraints:
+- Never claim or imply a pick has been persisted unless the prompt explicitly confirms save success.
+- If prompt context includes save/persistence errors, still provide upside analysis but avoid transactional assertions.

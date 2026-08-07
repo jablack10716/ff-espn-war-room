@@ -1,6 +1,6 @@
-# Fantasy Football AI War Room 🏈🤖
+# The Best Damn Fantasy Football Drafting App 🏈🤖
 
-The Fantasy Football AI War Room is a real-time, high-throughput draft assistant built for live ESPN fantasy football drafts. It combines a **deterministic Python Quant Engine** (Ada) with a **Multi-Agent LLM Debate system** (Marcus, Winston, Arthur) to provide championship-caliber drafting recommendations under live draft time constraints.
+**The Best Damn Fantasy Football Drafting App** is a real-time, high-throughput draft assistant built for live ESPN fantasy football drafts. It combines a **deterministic Python Quant Engine** (Ada) with a **Multi-Agent LLM Debate system** (Marcus, Winston, Arthur) to provide championship-caliber drafting recommendations under live draft time constraints.
 
 ## 🚀 Features
 

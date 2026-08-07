@@ -79,7 +79,7 @@ def call_llm_api(
 
     url = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
     if not model:
-        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -114,13 +114,13 @@ class MarcusAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "marcus_system.txt")
-        self.model = model or os.getenv("MARCUS_MODEL") or "gemini-2.5-flash"
+        self.model = model or os.getenv("MARCUS_MODEL") or "gemini-flash-latest"
 
     def evaluate_player(
         self, player: Dict[str, Any], timeout_seconds: float = 5.0
     ) -> Optional[Dict[str, Any]]:
         pid = str(player.get("player_id"))
-        pname = player.get("full_name")
+        pname = player.get("full_name") or player.get("player_name") or "This player"
         pos = player.get("position")
         team = player.get("team", "FA")
         tier = player.get("tier")
@@ -170,7 +170,7 @@ class WinstonAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "winston_system.txt")
-        self.model = model or os.getenv("WINSTON_MODEL") or "gemini-2.5-flash"
+        self.model = model or os.getenv("WINSTON_MODEL") or "gemini-flash-latest"
 
     def evaluate_player(
         self,
@@ -179,7 +179,7 @@ class WinstonAgent:
         timeout_seconds: float = 5.0,
     ) -> Optional[Dict[str, Any]]:
         pid = str(player.get("player_id"))
-        pname = player.get("full_name")
+        pname = player.get("full_name") or player.get("player_name") or "This player"
         pos = player.get("position")
         player_bye = player.get("bye_week", "Unknown")
 
@@ -233,7 +233,7 @@ class ArthurAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "arthur_system.txt")
-        self.model = model or os.getenv("ARTHUR_MODEL") or "gemini-2.5-pro"
+        self.model = model or os.getenv("ARTHUR_MODEL") or "gemini-flash-latest"
 
     def synthesize(
         self,

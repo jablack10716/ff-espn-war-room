@@ -37,3 +37,25 @@ def test_full_draft_grid_rendering_does_not_raise():
     # The grid data processing should execute smoothly
     assert len(draft_log) == 2
     assert espn_teams[0]["team_name"] == "Only Fam"
+
+
+def test_get_round_and_slot_from_pick_no():
+    from ui.components.full_draft_grid import _get_round_and_slot_from_pick_no
+
+    # Standard snake draft 12 teams
+    # Pick 1 -> R1, Slot 1
+    r, s = _get_round_and_slot_from_pick_no(1, num_teams=12, is_3rr=False)
+    assert (r, s) == (1, 1)
+
+    # Pick 12 -> R1, Slot 12
+    r, s = _get_round_and_slot_from_pick_no(12, num_teams=12, is_3rr=False)
+    assert (r, s) == (1, 12)
+
+    # Pick 13 -> R2, Slot 12 (Reversed)
+    r, s = _get_round_and_slot_from_pick_no(13, num_teams=12, is_3rr=False)
+    assert (r, s) == (2, 12)
+
+    # Pick 24 -> R2, Slot 1 (Reversed)
+    r, s = _get_round_and_slot_from_pick_no(24, num_teams=12, is_3rr=False)
+    assert (r, s) == (2, 1)
+

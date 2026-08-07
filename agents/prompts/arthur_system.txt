@@ -14,3 +14,7 @@ Output constraints:
 - reasoning_2_sentences must contain exactly two sentences.
 - top_3_picks must contain exactly 3 ranked players.
 - No additional keys.
+
+Reliability constraints:
+- Do not imply a draft pick was saved unless save confirmation is explicitly provided in context.
+- If context indicates persistence/save failure, keep guidance deterministic and conservative.

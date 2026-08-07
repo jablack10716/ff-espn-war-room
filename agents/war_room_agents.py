@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from dotenv import load_dotenv
 
+load_dotenv()
+
 LOGGER = logging.getLogger("war_room_agents")
 
 try:
@@ -113,7 +115,7 @@ def call_llm_api(
 
     url = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
     if not model:
-        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -155,7 +157,7 @@ class MarcusAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "marcus_system.txt")
-        self.model = model or os.getenv("MARCUS_MODEL") or "gemini-2.5-flash"
+        self.model = model or os.getenv("MARCUS_MODEL") or "gemini-3.6-flash"
 
     def evaluate_player(
         self, player: Dict[str, Any], timeout_seconds: float = 5.0
@@ -211,7 +213,7 @@ class WinstonAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "winston_system.txt")
-        self.model = model or os.getenv("WINSTON_MODEL") or "gemini-2.5-flash"
+        self.model = model or os.getenv("WINSTON_MODEL") or "gemini-3.6-flash"
 
     def evaluate_player(
         self,
@@ -274,7 +276,7 @@ class ArthurAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "arthur_system.txt")
-        self.model = model or os.getenv("ARTHUR_MODEL") or "gemini-2.5-pro"
+        self.model = model or os.getenv("ARTHUR_MODEL") or "gemini-3.6-flash"
 
     def synthesize(
         self,
@@ -405,7 +407,7 @@ class WarRoomOrchestrator:
         self,
         top_candidates: List[Dict[str, Any]],
         user_roster: List[Dict[str, Any]],
-        timeout_seconds: float = 6.0,
+        timeout_seconds: float = 10.0,
     ) -> Tuple[Dict[str, str], Dict[str, str], List[Dict[str, Any]], List[Dict[str, Any]], bool]:
         """Run a single batched API call for Marcus and Winston evaluations to respect API rate limits."""
         marcus_notes: Dict[str, str] = {}
@@ -414,17 +416,35 @@ class WarRoomOrchestrator:
         winston_list: List[Dict[str, Any]] = []
         marcus_winston_success = False
 
-        # Populate baseline position-aware fallbacks first
+        # Populate baseline position-aware fallbacks in-memory (no network requests)
+        marcus_fallbacks = {
+            "QB": "displays high-caliber passing talent with dual-threat rushing upside.",
+            "RB": "possesses significant athletic upside and a clear pathway for dominant touch share.",
+            "WR": "profiles as an explosive target with strong route-running upside.",
+            "TE": "provides rare positional ceiling with growing red-zone target opportunity.",
+            "K": "operates in a high-scoring offense offering steady scoring opportunities.",
+            "DST": "defense generates disruptive pressure and high turnover potential.",
+        }
+        winston_fallbacks = {
+            "QB": "locks in an essential QB anchor for your roster.",
+            "RB": "addresses key RB depth and balances positional volume.",
+            "WR": "fills a vital WR starting slot and upgrades receiving depth.",
+            "TE": "secures crucial TE positional value for starting requirements.",
+            "K": "satisfies the kicker roster requirement.",
+            "DST": "satisfies the defense roster requirement.",
+        }
         for p in top_candidates:
-            m_eval = self.marcus.evaluate_player(p, timeout_seconds=0.01)
-            w_eval = self.winston.evaluate_player(p, user_roster, timeout_seconds=0.01)
             pid = str(p.get("player_id"))
-            if m_eval and m_eval.get("upside_sentence"):
-                marcus_notes[pid] = m_eval["upside_sentence"]
-                marcus_list.append(m_eval)
-            if w_eval and w_eval.get("need_sentence"):
-                winston_notes[pid] = w_eval["need_sentence"]
-                winston_list.append(w_eval)
+            pname = p.get("full_name") or p.get("player_name") or "This player"
+            pos = str(p.get("position", "")).upper()
+
+            m_text = f"{pname} {marcus_fallbacks.get(pos, 'possesses significant athletic upside.')}"
+            w_text = f"Drafting {pname} {winston_fallbacks.get(pos, 'addresses a key positional requirement.')}"
+
+            marcus_notes[pid] = m_text
+            winston_notes[pid] = w_text
+            marcus_list.append({"agent": "Marcus", "player_id": pid, "upside_sentence": m_text})
+            winston_list.append({"agent": "Winston", "player_id": pid, "need_sentence": w_text})
 
         # Execute single batched API request if LLM API key present
         if os.getenv("GEMINI_API_KEY"):
@@ -453,15 +473,26 @@ class WarRoomOrchestrator:
                 try:
                     data = json.loads(raw)
                     if validate_schema(data, "batched_evaluations.schema.json"):
+                        fresh_marcus_notes: Dict[str, str] = {}
+                        fresh_winston_notes: Dict[str, str] = {}
+                        fresh_marcus_list: List[Dict[str, Any]] = []
+                        fresh_winston_list: List[Dict[str, Any]] = []
+
                         for item in data.get("evaluations", []):
                             pid = str(item.get("player_id"))
                             if pid and item.get("upside_sentence"):
-                                marcus_notes[pid] = item["upside_sentence"]
-                                marcus_list.append({"agent": "Marcus", "player_id": pid, "upside_sentence": item["upside_sentence"]})
+                                fresh_marcus_notes[pid] = item["upside_sentence"]
+                                fresh_marcus_list.append({"agent": "Marcus", "player_id": pid, "upside_sentence": item["upside_sentence"]})
                             if pid and item.get("need_sentence"):
-                                winston_notes[pid] = item["need_sentence"]
-                                winston_list.append({"agent": "Winston", "player_id": pid, "need_sentence": item["need_sentence"]})
-                        marcus_winston_success = True
+                                fresh_winston_notes[pid] = item["need_sentence"]
+                                fresh_winston_list.append({"agent": "Winston", "player_id": pid, "need_sentence": item["need_sentence"]})
+
+                        if fresh_marcus_notes and fresh_winston_notes:
+                            marcus_notes = fresh_marcus_notes
+                            winston_notes = fresh_winston_notes
+                            marcus_list = fresh_marcus_list
+                            winston_list = fresh_winston_list
+                            marcus_winston_success = True
                 except Exception as exc:
                     LOGGER.warning("Failed to parse batched evaluation response: %s", exc)
 
@@ -472,7 +503,7 @@ class WarRoomOrchestrator:
         candidate_players: List[Dict[str, Any]],
         user_roster: List[Dict[str, Any]],
         ada_rankings: List[Dict[str, Any]],
-        timeout_seconds: float = 15.0,
+        timeout_seconds: float = 25.0,
     ) -> Dict[str, Any]:
         """Execute batched evaluations and Arthur synthesis with dynamic time budgeting."""
         import time
@@ -485,7 +516,7 @@ class WarRoomOrchestrator:
             return fallback_payload
 
         top_candidates = ada_rankings[:3]
-        batched_timeout = max(6.0, min(10.0, timeout_seconds * 0.5))
+        batched_timeout = max(8.0, min(12.0, timeout_seconds * 0.4))
 
         marcus_winston_success = False
         try:
@@ -493,9 +524,9 @@ class WarRoomOrchestrator:
                 top_candidates, user_roster, timeout_seconds=batched_timeout
             )
 
-            # Dynamic synthesis timeout: use whatever time remains from total budget with a minimum of 8s
+            # Dynamic synthesis timeout: use remaining time with a minimum of 14.0s for Arthur
             elapsed = time.time() - t_start
-            synthesis_timeout = max(8.0, timeout_seconds - elapsed)
+            synthesis_timeout = max(14.0, timeout_seconds - elapsed)
 
             arthur_res = self.arthur.synthesize(marcus_list, winston_list, ada_rankings, timeout_seconds=synthesis_timeout)
             elapsed_total = round(time.time() - t_start, 3)

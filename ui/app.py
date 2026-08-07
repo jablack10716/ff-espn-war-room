@@ -781,7 +781,7 @@ def main() -> None:
                         candidate_players=available_players,
                         user_roster=user_roster,
                         ada_rankings=rankings,
-                        timeout_seconds=float(st.session_state.get("agent_timeout_seconds", 15)),
+                        timeout_seconds=float(st.session_state.get("agent_timeout_seconds", 25)),
                     )
                     st.session_state.agent_payload_pick_no = current_pick
 

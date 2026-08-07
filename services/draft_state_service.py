@@ -30,6 +30,7 @@ class DraftStateService:
         self._lock = threading.Lock()
         self._local_available_players: Dict[str, Dict[str, Any]] = {}
         self._local_draft_log: Dict[str, List[Dict[str, Any]]] = {}
+        self._local_telemetry: List[Dict[str, Any]] = []
 
     def set_local_players(self, draft_id: str, players: List[Dict[str, Any]]) -> None:
         """Seed or override local player cache for draft_id."""
@@ -108,10 +109,27 @@ class DraftStateService:
         picked_by_user: bool = False,
         source: str = "manual",
         notes: Optional[str] = None,
+        telemetry_data: Optional[Dict[str, Any]] = None,
+        marcus_pitch: Optional[str] = None,
+        winston_pitch: Optional[str] = None,
+        arthur_gm_reasoning: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Record a new player draft pick event and set player unavailable."""
         db_source = source if source in ("manual", "system") else "manual"
         db_notes = notes or ("Pre-draft keeper" if source == "keeper" else None)
+
+        if picked_by_user or telemetry_data or marcus_pitch or winston_pitch or arthur_gm_reasoning:
+            self.log_user_pick(
+                draft_id=draft_id,
+                pick_number=pick_no,
+                round_no=round_no,
+                selected_player_id=player_id,
+                selected_player_name=player_name,
+                telemetry_data=telemetry_data,
+                marcus_pitch=marcus_pitch,
+                winston_pitch=winston_pitch,
+                arthur_gm_reasoning=arthur_gm_reasoning,
+            )
 
         event_payload = {
             "draft_id": draft_id,
@@ -427,4 +445,64 @@ class DraftStateService:
         available = self.get_available_players(draft_id)
         log = self.get_draft_log(draft_id)
         return available, log
+
+    def log_user_pick(
+        self,
+        draft_id: str,
+        pick_number: int,
+        round_no: int,
+        selected_player_id: str,
+        selected_player_name: str,
+        telemetry_data: Optional[Dict[str, Any]] = None,
+        marcus_pitch: Optional[str] = None,
+        winston_pitch: Optional[str] = None,
+        arthur_gm_reasoning: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Freeze exact calculations, market context, and LLM pitch outputs and INSERT into draft_decision_telemetry."""
+        t_data = telemetry_data or {}
+        telemetry_payload = {
+            "draft_id": draft_id,
+            "pick_number": pick_number,
+            "round": round_no,
+            "selected_player_id": str(selected_player_id),
+            "selected_player_name": str(selected_player_name),
+            "ada_rank_recommended": t_data.get("ada_rank_recommended"),
+            "ada_composite_score": t_data.get("ada_composite_score"),
+            "projected_points_median": t_data.get("projected_points_median"),
+            "projected_floor": t_data.get("projected_floor"),
+            "projected_ceiling": t_data.get("projected_ceiling"),
+            "dynamic_vorp": t_data.get("dynamic_vorp"),
+            "opportunity_cost_delta": t_data.get("opportunity_cost_delta"),
+            "fcvs_weight_applied": str(t_data.get("fcvs_weight_applied")) if t_data.get("fcvs_weight_applied") is not None else None,
+            "hli_multiplier_applied": t_data.get("hli_multiplier_applied"),
+            "prv_alert_active": bool(t_data.get("prv_alert_active")) if t_data.get("prv_alert_active") is not None else None,
+            "consensus_ecr_rank": t_data.get("consensus_ecr_rank"),
+            "adp_at_draft_time": t_data.get("adp_at_draft_time"),
+            "adp_survival_prob_to_next_turn": t_data.get("adp_survival_prob_to_next_turn"),
+            "qbs_drafted_count": t_data.get("qbs_drafted_count"),
+            "rbs_drafted_count": t_data.get("rbs_drafted_count"),
+            "wrs_drafted_count": t_data.get("wrs_drafted_count"),
+            "marcus_pitch": marcus_pitch or t_data.get("marcus_pitch"),
+            "winston_pitch": winston_pitch or t_data.get("winston_pitch"),
+            "arthur_gm_reasoning": arthur_gm_reasoning or t_data.get("arthur_gm_reasoning"),
+        }
+
+        log_action("TELEMETRY_LOG_START", f"Logging draft decision telemetry for pick #{pick_number}", {
+            "draft_id": draft_id,
+            "pick_number": pick_number,
+            "player_id": selected_player_id,
+        })
+
+        if self.use_supabase:
+            try:
+                client = get_supabase_client()
+                client.table("draft_decision_telemetry").insert(telemetry_payload).execute()
+                log_action("TELEMETRY_LOG_SUCCESS", f"Telemetry inserted into Supabase for pick #{pick_number}")
+            except Exception as exc:
+                LOGGER.warning("Failed to insert telemetry into Supabase: %s", exc)
+
+        with self._lock:
+            self._local_telemetry.append(telemetry_payload)
+
+        return telemetry_payload
 

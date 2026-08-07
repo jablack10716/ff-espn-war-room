@@ -12,6 +12,10 @@ import math
 from typing import Any, Dict, List, Optional, Sequence
 
 from engine.scoring_models import (
+    apply_playoff_schedule_modifier,
+    apply_scheme_and_line_scalars,
+    apply_stacking_multiplier,
+    blend_vegas_props,
     calculate_effective_starters,
     calculate_fcvs_raw,
     calculate_hli_raw,
@@ -176,6 +180,8 @@ class AdaQuantEngine:
         candidates_egp: List[Dict[str, Any]] = []
         for p in candidates:
             p_copy = dict(p)
+            # 2. Vegas Market Prop Consensus Blending
+            p_copy["projection_median"] = blend_vegas_props(p_copy)
             inj = str(p_copy.get("injury_status") or "ACTIVE").upper()
             mult = INJURY_EGP_MULTIPLIERS.get(inj, 1.0)
             raw_proj = float(p_copy.get("projection_median") or 0.0)
@@ -281,6 +287,11 @@ class AdaQuantEngine:
                 if median > 0:
                     hli_mult = round(hli_raw / median, 4)
 
+            # Additional mathematical factor multipliers
+            stacking_mult = apply_stacking_multiplier(player, user_roster)
+            scheme_mult = apply_scheme_and_line_scalars(player)
+            playoff_mult = apply_playoff_schedule_modifier(player, current_round)
+
             # Static component weights across all positions
             w_oc = base_w_oc
             w_vor = base_w_vor
@@ -290,7 +301,9 @@ class AdaQuantEngine:
             w_rfit = base_w_rfit
 
             base_sum = w_oc * oc_n + w_vor * vor_n + w_fcvs * fcvs_n + w_hli * hli_n + w_prv * prv_n + w_rfit * rfit_n
-            composite_score = round(base_sum * hli_mult, 4)
+            composite_score = round(
+                base_sum * hli_mult * stacking_mult * scheme_mult * playoff_mult, 4
+            )
 
             results.append({
                 "player_id": player.get("player_id"),

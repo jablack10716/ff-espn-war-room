@@ -60,12 +60,133 @@ POSITION_VARIANCE: Dict[str, Dict[str, float]] = {
 }
 
 
+TEAM_SCHEME_AND_LINE: Dict[str, Dict[str, Any]] = {
+    # Default Team Coaching PROE and O-Line Tiers (Tier 1: Top 5, Tier 5: Bottom 5)
+    "PHI": {"oline_tier": 1, "proe": "POSITIVE"},
+    "DET": {"oline_tier": 1, "proe": "POSITIVE"},
+    "KC": {"oline_tier": 1, "proe": "POSITIVE"},
+    "BAL": {"oline_tier": 1, "proe": "NEUTRAL"},
+    "SF": {"oline_tier": 2, "proe": "NEUTRAL"},
+    "BUF": {"oline_tier": 2, "proe": "POSITIVE"},
+    "CIN": {"oline_tier": 3, "proe": "POSITIVE"},
+    "MIA": {"oline_tier": 2, "proe": "POSITIVE"},
+    "MIN": {"oline_tier": 3, "proe": "POSITIVE"},
+    "DAL": {"oline_tier": 2, "proe": "POSITIVE"},
+    "CAR": {"oline_tier": 5, "proe": "NEGATIVE"},
+    "NE": {"oline_tier": 5, "proe": "NEGATIVE"},
+    "NYG": {"oline_tier": 5, "proe": "NEGATIVE"},
+    "TEN": {"oline_tier": 5, "proe": "NEGATIVE"},
+    "WAS": {"oline_tier": 4, "proe": "NEUTRAL"},
+}
+
+
+def apply_stacking_multiplier(
+    player: Dict[str, Any], user_roster: Sequence[Dict[str, Any]]
+) -> float:
+    """Calculate QB-WR/TE Stacking Covariance Multiplier.
+
+    Primary Pass Catcher (WR1/TE1): 1.07x multiplier.
+    Secondary Pass Catcher (WR2): 1.04x multiplier.
+    """
+    pos = str(player.get("position", "")).upper()
+    if pos not in ("WR", "TE"):
+        return 1.0
+
+    player_team = str(player.get("team") or "").upper()
+    if not player_team:
+        return 1.0
+
+    # Scan user_roster for drafted QBs
+    drafted_qb_teams = {
+        str(p.get("team") or "").upper()
+        for p in user_roster
+        if str(p.get("position", "")).upper() == "QB"
+    }
+
+    if player_team in drafted_qb_teams:
+        depth_role = str(player.get("depth_role") or "").upper()
+        is_primary = (
+            player.get("is_primary_target") is True
+            or depth_role in ("WR1", "TE1", "PRIMARY")
+            or (pos == "TE" and depth_role != "TE2")
+        )
+        if depth_role == "WR2" or (not is_primary and depth_role != "WR1"):
+            return 1.04
+        return 1.07
+
+    return 1.0
+
+
+def blend_vegas_props(player: Dict[str, Any]) -> float:
+    """Blend Vegas Market Over/Under prop implied points with fantasy consensus projections.
+
+    Formula: Adjusted_Projection = (0.65 * Fantasy_Consensus_Median) + (0.35 * Vegas_Prop_Implied_Points)
+    Fallbacks to pure consensus if Vegas prop data is missing or null.
+    """
+    median = float(player.get("projection_median") or 0.0)
+    vegas_pts = player.get("vegas_projected_pts")
+    if vegas_pts is not None and float(vegas_pts) > 0:
+        return round(0.65 * median + 0.35 * float(vegas_pts), 4)
+    return median
+
+
+def apply_scheme_and_line_scalars(player: Dict[str, Any]) -> float:
+    """Apply Play-Caller PROE (Pass Rate Over Expected) & Offensive Line Efficiency Scalars.
+
+    RBs on Top-5 O-Lines get 1.05x; Bottom-5 O-Lines get 0.95x.
+    WRs/TEs under positive PROE play-callers get 1.04x; heavy negative PROE get 0.96x.
+    """
+    pos = str(player.get("position", "")).upper()
+    team = str(player.get("team") or "").upper()
+    scheme_info = TEAM_SCHEME_AND_LINE.get(team, {})
+
+    oline_tier = player.get("oline_tier", scheme_info.get("oline_tier", 3))
+    proe_status = str(
+        player.get("proe_status", scheme_info.get("proe", "NEUTRAL"))
+    ).upper()
+
+    mult = 1.0
+
+    if pos == "RB":
+        if oline_tier == 1:
+            mult *= 1.05
+        elif oline_tier == 5:
+            mult *= 0.95
+
+    if pos in ("WR", "TE"):
+        if proe_status in ("POSITIVE", "HIGH"):
+            mult *= 1.04
+        elif proe_status in ("NEGATIVE", "HEAVY_NEGATIVE", "LOW"):
+            mult *= 0.96
+
+    return round(mult, 4)
+
+
+def apply_playoff_schedule_modifier(player: Dict[str, Any], round_no: int) -> float:
+    """Apply Playoff Climate & Schedule Matchup Weight (Weeks 15-17) for Round 7+.
+
+    If player plays >=2 dome/indoor games or against bottom-10 pass/rush defenses
+    in Weeks 15-17, apply a 1.03x Playoff Correlation Multiplier.
+    """
+    if round_no < 7:
+        return 1.0
+
+    dome_games = player.get("playoff_dome_games", 0)
+    easy_matchups = player.get("playoff_easy_matchups", 0)
+    favorable_flag = player.get("favorable_playoff_schedule") is True
+
+    if dome_games >= 2 or easy_matchups >= 2 or favorable_flag:
+        return 1.03
+
+    return 1.0
+
+
 def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
     """Calculate raw Floor-to-Ceiling Variance Shift score based on draft round.
 
     Rounds 1-5: 80% floor, 20% ceiling
     Rounds 6-9: 50% floor, 50% ceiling
-    Rounds 10+: 10% floor, 90% ceiling
+    Rounds 10+: 10% floor, 90% ceiling (with Log-Normal right-tail expansion for late rounds)
     """
     pos = str(player.get("position", "")).upper()
     pos_var = POSITION_VARIANCE.get(pos, {"floor_mult": 0.85, "ceil_mult": 1.15})
@@ -73,6 +194,9 @@ def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
     ceil_mult = pos_var["ceil_mult"]
 
     is_rookie = player.get("is_rookie") is True or player.get("experience", 1) == 0
+    uncertainty_flag = (
+        is_rookie or player.get("uncertainty_flag") is True or pos in ("WR", "TE", "RB")
+    )
     if is_rookie:
         floor_mult = max(0.0, floor_mult - 0.15)
         ceil_mult += 0.20
@@ -83,6 +207,11 @@ def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
 
     floor_val = float(floor) if floor is not None else max(0.0, median * floor_mult)
     ceiling_val = float(ceiling) if ceiling is not None else max(median, median * ceil_mult)
+
+    # Non-Gaussian (Log-Normal) Tail Variance expansion for Round 10+
+    if round_no >= 10 and uncertainty_flag:
+        flag_val = 1.0 if (is_rookie or player.get("uncertainty_flag") is True) else 0.5
+        ceiling_val = ceiling_val * (1.0 + (0.15 * flag_val))
 
     w_floor = max(0.10, round(0.90 - 0.08 * (round_no - 1), 4))
     w_ceiling = round(1.0 - w_floor, 4)

@@ -32,15 +32,21 @@ def render_recommendations(
             st.markdown(f"> 👑 **GM Strategy Rationale**: *\"{reasoning}\"*")
 
         # Interactive War Room Debate & Commentary Expander
-        with st.expander("🗣️ Live War Room Agent Debate & Commentary", expanded=not fallback):
-            st.markdown("### 🎙️ The War Room Debate")
+        expander_title = "🗣️ Live War Room Agent Debate & Commentary (🤖 AI Active)" if not fallback else "🗣️ Live War Room Agent Debate & Commentary (⚠️ Fallback Active)"
+        with st.expander(expander_title, expanded=not fallback):
+            if fallback:
+                st.markdown("### 🎙️ The War Room Debate `(⚠️ Fallback Templates)`")
+            else:
+                st.markdown("### 🎙️ The War Room Debate `(🤖 AI Active)`")
             st.markdown(
                 "Here is the live exchange between **Marcus** (Upside Scout), **Winston** (Roster Architect), and **Arthur** (GM):"
             )
 
             col_m, col_w = st.columns(2)
             with col_m:
-                st.markdown("#### 🏃 Marcus (Chief Scout)")
+                m_fallback = agent_payload.get("marcus_fallback", False)
+                m_tag = " `[Fallback]`" if m_fallback else " `[AI]`"
+                st.markdown(f"#### 🏃 Marcus (Chief Scout){m_tag}")
                 if marcus_dict:
                     for pid, sentence in marcus_dict.items():
                         st.markdown(f"- **{sentence}**")
@@ -48,7 +54,9 @@ def render_recommendations(
                     st.caption("No scouting notes generated.")
 
             with col_w:
-                st.markdown("#### 📋 Winston (Roster Architect)")
+                w_fallback = agent_payload.get("winston_fallback", False)
+                w_tag = " `[Fallback]`" if w_fallback else " `[AI]`"
+                st.markdown(f"#### 📋 Winston (Roster Architect){w_tag}")
                 if winston_dict:
                     for pid, sentence in winston_dict.items():
                         st.markdown(f"- **{sentence}**")
@@ -56,7 +64,8 @@ def render_recommendations(
                     st.caption("No roster notes generated.")
 
             st.markdown("---")
-            st.markdown("#### 👑 Arthur (General Manager Verdict)")
+            a_tag = " `[Fallback]`" if fallback else " `[AI]`"
+            st.markdown(f"#### 👑 Arthur (General Manager Verdict){a_tag}")
             st.write(reasoning or "Arthur synthesized Ada's quant baseline to lock in top recommendation.")
 
         st.markdown("---")
@@ -124,10 +133,15 @@ def render_recommendations(
                     st.success("🔒 High-Leverage Handcuff Protection")
 
                 # Agent Scout & Roster Notes
+                m_fallback = agent_payload.get("marcus_fallback", False) if agent_payload else True
+                w_fallback = agent_payload.get("winston_fallback", False) if agent_payload else True
+                m_label = "Fallback" if m_fallback else "AI"
+                w_label = "Fallback" if w_fallback else "AI"
+
                 if pid in marcus_notes:
-                    st.markdown(f"🏃 **Marcus (Scout)**: *{marcus_notes[pid]}*")
+                    st.markdown(f"🏃 **Marcus (Scout - {m_label})**: *{marcus_notes[pid]}*")
                 if pid in winston_notes:
-                    st.markdown(f"📋 **Winston (Architect)**: *{winston_notes[pid]}*")
+                    st.markdown(f"📋 **Winston (Architect - {w_label})**: *{winston_notes[pid]}*")
 
             with col_scores:
                 st.metric("Composite Score", f"{composite:.4f}")

@@ -52,7 +52,14 @@ def test_dynamic_ppr_adjustment() -> None:
     assert apply_ppr_adjustment(player_rec, "PPR") == 100.0
     assert apply_ppr_adjustment(player_rec, "HALF_PPR") == 50.0
 
-    # Player without projected_receptions (fallback)
-    player_fallback = {"position": "WR"}
-    assert apply_ppr_adjustment(player_fallback, "PPR") == 85.0
-    assert apply_ppr_adjustment(player_fallback, "HALF_PPR") == 42.5
+    # Player without projected_receptions (receiving yards fallback)
+    player_rec_yards = {"position": "WR", "projected_receiving_yards": 1000.0}
+    # 1000 / 12.5 = 80 receptions -> 80.0 PPR, 40.0 HALF_PPR
+    assert apply_ppr_adjustment(player_rec_yards, "PPR") == 80.0
+    assert apply_ppr_adjustment(player_rec_yards, "HALF_PPR") == 40.0
+
+    # Player without projected_receptions or receiving yards (median fallback)
+    player_fallback = {"position": "WR", "projection_median": 200.0}
+    # 200.0 * 0.25 = 50.0 PPR, 25.0 HALF_PPR
+    assert apply_ppr_adjustment(player_fallback, "PPR") == 50.0
+    assert apply_ppr_adjustment(player_fallback, "HALF_PPR") == 25.0

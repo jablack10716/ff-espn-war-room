@@ -69,13 +69,20 @@ def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
     """
     pos = str(player.get("position", "")).upper()
     pos_var = POSITION_VARIANCE.get(pos, {"floor_mult": 0.85, "ceil_mult": 1.15})
+    floor_mult = pos_var["floor_mult"]
+    ceil_mult = pos_var["ceil_mult"]
+
+    is_rookie = player.get("is_rookie") is True or player.get("experience", 1) == 0
+    if is_rookie:
+        floor_mult = max(0.0, floor_mult - 0.15)
+        ceil_mult += 0.20
 
     median = float(player.get("projection_median") or 0.0)
     floor = player.get("projection_floor")
     ceiling = player.get("projection_ceiling")
 
-    floor_val = float(floor) if floor is not None else max(0.0, median * pos_var["floor_mult"])
-    ceiling_val = float(ceiling) if ceiling is not None else max(median, median * pos_var["ceil_mult"])
+    floor_val = float(floor) if floor is not None else max(0.0, median * floor_mult)
+    ceiling_val = float(ceiling) if ceiling is not None else max(median, median * ceil_mult)
 
     w_floor = max(0.10, round(0.90 - 0.08 * (round_no - 1), 4))
     w_ceiling = round(1.0 - w_floor, 4)
@@ -325,6 +332,17 @@ def calculate_roster_fit(
         else:
             mult = 0.80
 
+    # Bye week collision penalty for "onesie" positions (QB, TE)
+    if pos in ("QB", "TE") and user_roster:
+        player_bye = player.get("bye_week")
+        if player_bye is not None and str(player_bye).strip() != "":
+            for r_player in user_roster:
+                r_pos = str(r_player.get("position", "")).upper()
+                r_bye = r_player.get("bye_week")
+                if r_pos == pos and r_bye is not None and str(r_bye).strip() != "" and str(player_bye) == str(r_bye):
+                    mult *= 0.60
+                    break
+
     return round(mult, 4)
 
 
@@ -406,12 +424,18 @@ def apply_ppr_adjustment(
         return round(float(proj_rec) * ppr_multiplier, 2)
 
     pos = str(player.get("position", "")).upper()
-    if pos == "WR":
-        return 85.0 if is_full else 42.5
-    elif pos == "TE":
-        return 55.0 if is_full else 27.5
-    elif pos == "RB":
-        return 40.0 if is_full else 20.0
 
-    return 0.0
+    # First fallback: Calculate via projected_receiving_yards / YPR
+    rec_yards = player.get("projected_receiving_yards")
+    ypr_map = {"WR": 12.5, "TE": 10.5, "RB": 7.5}
+    if rec_yards is not None and float(rec_yards) > 0 and pos in ypr_map:
+        est_rec = float(rec_yards) / ypr_map[pos]
+        return round(est_rec * ppr_multiplier, 2)
+
+    # Second fallback: Scale PPR bonus as percentage of projection_median
+    median = float(player.get("projection_median") or 0.0)
+    pct_map = {"WR": 0.25, "TE": 0.20, "RB": 0.15}
+    pct = pct_map.get(pos, 0.0)
+
+    return round(median * pct * ppr_multiplier, 2)
 

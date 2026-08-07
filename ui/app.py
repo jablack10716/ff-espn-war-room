@@ -16,6 +16,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import ui.startup
+
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
@@ -78,6 +80,8 @@ def init_session_state() -> None:
         st.session_state.keeper_expander_open = False
     if "draft_started" not in st.session_state:
         st.session_state.draft_started = False
+    if "agent_timeout_seconds" not in st.session_state:
+        st.session_state.agent_timeout_seconds = 25
 
 
 @st.cache_resource
@@ -129,8 +133,12 @@ def main() -> None:
             },
         )
 
-        pick_source = "keeper" if not st.session_state.get("draft_started", False) else "manual"
-        pick_notes = "Pre-draft keeper" if not st.session_state.get("draft_started", False) else None
+        is_draft_started = st.session_state.get("draft_started", False)
+        if st.session_state.draft_mode == "🎯 Live ESPN Draft":
+            is_draft_started = True
+
+        pick_source = "keeper" if not is_draft_started else "manual"
+        pick_notes = "Pre-draft keeper" if not is_draft_started else None
 
         try:
             upsert_pick = getattr(service, "upsert_pick", None)
@@ -186,24 +194,42 @@ def main() -> None:
         team_name: str,
         picked_by_user: bool,
     ) -> None:
-        log_action("RECORD_KEEPER", f"Locking keeper #{pick_no}: {player_name}")
-        service.record_pick(
-            draft_id=st.session_state.draft_id,
-            pick_no=pick_no,
-            round_no=round_no,
-            team_slot=team_slot,
-            player_id=player_id,
-            player_name=player_name,
-            position=position,
-            team_name=team_name,
-            picked_by_user=picked_by_user,
-            source="keeper",
-            notes="Pre-draft keeper",
-        )
-        st.session_state.flash_notification = (
-            "success",
-            f"🔒 Keeper Locked: **{player_name}** ({position}) assigned to {team_name} at Pick #{pick_no}!"
-        )
+        log_action("RECORD_KEEPER_START", f"Locking keeper #{pick_no}: {player_name}", {
+            "draft_id": st.session_state.draft_id,
+            "pick_no": pick_no,
+            "round_no": round_no,
+            "team_slot": team_slot,
+            "player_id": player_id,
+            "player_name": player_name,
+            "position": position,
+            "team_name": team_name,
+            "picked_by_user": picked_by_user,
+        })
+        try:
+            res = service.record_pick(
+                draft_id=st.session_state.draft_id,
+                pick_no=pick_no,
+                round_no=round_no,
+                team_slot=team_slot,
+                player_id=player_id,
+                player_name=player_name,
+                position=position,
+                team_name=team_name,
+                picked_by_user=picked_by_user,
+                source="manual",
+                notes="Pre-draft keeper",
+            )
+            log_action("RECORD_KEEPER_SUCCESS", f"Keeper #{pick_no} saved successfully", {"result": str(res)})
+            st.session_state.flash_notification = (
+                "success",
+                f"🔒 Keeper Locked: **{player_name}** ({position}) assigned to {team_name} at Pick #{pick_no}!"
+            )
+        except Exception as exc:
+            log_action("RECORD_KEEPER_ERROR", f"Failed to record keeper #{pick_no}: {exc}", {"error": str(exc)})
+            st.session_state.flash_notification = (
+                "error",
+                f"❌ Failed to lock keeper #{pick_no}: {exc}"
+            )
         st.rerun()
 
     def handle_undo_last_pick() -> None:
@@ -428,7 +454,7 @@ def main() -> None:
             "Max LLM Timeout (seconds)",
             min_value=3,
             max_value=30,
-            value=st.session_state.get("agent_timeout_seconds", 15),
+            value=st.session_state.get("agent_timeout_seconds", 25),
             help="Allows agents longer time for deep scouting debate when on the clock.",
         )
 
@@ -512,6 +538,7 @@ def main() -> None:
 
     # Instantiate quant engine & orchestrator
     quant_engine = AdaQuantEngine()
+    
     from agents.war_room_agents import WarRoomOrchestrator
 
     orchestrator = WarRoomOrchestrator()
@@ -573,6 +600,8 @@ def main() -> None:
     }
 
     is_draft_started = st.session_state.get("draft_started", False)
+    if st.session_state.draft_mode == "🎯 Live ESPN Draft":
+        is_draft_started = True
 
     if not is_draft_started or not live_pick_nos:
         # Pre-draft mode: start at the first unassigned pick slot starting from Pick 1
@@ -742,16 +771,21 @@ def main() -> None:
             # Extract user roster for bye week checking & agent context
             user_roster = [e for e in draft_log if int(e.get("team_slot", 0)) == user_slot]
 
-            # Trigger Multi-Agent Orchestrator if picks_until_user_turn <= 2
-            agent_payload = None
-            if orchestrator.should_trigger(picks_until_user_turn):
-                agent_payload = orchestrator.run_orchestration(
-                    candidate_players=available_players,
-                    user_roster=user_roster,
-                    ada_rankings=rankings,
-                    timeout_seconds=float(st.session_state.get("agent_timeout_seconds", 15)),
-                )
+            # Manual trigger for Multi-Agent Orchestrator
+            if st.session_state.get("agent_payload_pick_no") != current_pick:
+                st.session_state.agent_payload = None
 
+            if st.button("🤖 Ask War Room Agents (Marcus, Winston, Arthur)", use_container_width=True, type="primary"):
+                with st.spinner("Agents deliberating..."):
+                    st.session_state.agent_payload = orchestrator.run_orchestration(
+                        candidate_players=available_players,
+                        user_roster=user_roster,
+                        ada_rankings=rankings,
+                        timeout_seconds=float(st.session_state.get("agent_timeout_seconds", 15)),
+                    )
+                    st.session_state.agent_payload_pick_no = current_pick
+
+            agent_payload = st.session_state.get("agent_payload")
             render_recommendations(rankings, agent_payload=agent_payload, user_roster=user_roster, top_n=5)
 
 

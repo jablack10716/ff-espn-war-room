@@ -14,13 +14,13 @@ def test_ppr_boosts_wr_and_te_over_standard():
     assert apply_ppr_adjustment(wr, "STANDARD") == 0.0
     assert apply_ppr_adjustment(rb, "STANDARD") == 0.0
 
-    # Full PPR -> WR +85, TE +55, RB +40
-    assert apply_ppr_adjustment(wr, "PPR") == 85.0
-    assert apply_ppr_adjustment(te, "PPR") == 55.0
-    assert apply_ppr_adjustment(rb, "PPR") == 40.0
+    # Full PPR -> WR 25% of median (50.0), TE 20% of median (30.0), RB 15% of median (30.0)
+    assert apply_ppr_adjustment(wr, "PPR") == 50.0
+    assert apply_ppr_adjustment(te, "PPR") == 30.0
+    assert apply_ppr_adjustment(rb, "PPR") == 30.0
     assert apply_ppr_adjustment(qb, "PPR") == 0.0
 
-    # Half PPR -> WR +42.5, TE +27.5, RB +20
-    assert apply_ppr_adjustment(wr, "HALF_PPR") == 42.5
-    assert apply_ppr_adjustment(te, "HALF_PPR") == 27.5
-    assert apply_ppr_adjustment(rb, "HALF_PPR") == 20.0
+    # Half PPR -> WR 25.0, TE 15.0, RB 15.0
+    assert apply_ppr_adjustment(wr, "HALF_PPR") == 25.0
+    assert apply_ppr_adjustment(te, "HALF_PPR") == 15.0
+    assert apply_ppr_adjustment(rb, "HALF_PPR") == 15.0

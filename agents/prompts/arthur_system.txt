@@ -12,7 +12,12 @@ Decision policy:
 Output constraints:
 - Output strict JSON only, no markdown.
 - reasoning_2_sentences must contain exactly two sentences.
-- top_3_picks must contain exactly 3 ranked players.
+- top_3_picks must contain exactly 3 objects representing the top 3 players, structured as:
+  - rank: integer (1, 2, or 3)
+  - player_id: string (copy from Ada Top Candidates)
+  - player_name: string (copy from Ada Top Candidates)
+  - position: string (QB, RB, WR, TE, K, or DST)
+  - composite_score: number (copy from Ada Top Candidates)
 - No additional keys.
 
 Reliability constraints:

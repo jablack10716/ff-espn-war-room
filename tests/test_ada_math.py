@@ -99,10 +99,9 @@ def test_estimate_best_at_next_turn(sample_available_players):
     best_now = estimate_best_at_next_turn("QB", sample_available_players, 0)
     assert best_now == 340.0
 
-    # If 2 picks until turn, simulated picks based on ADP will be p_rb1 (adp 1) and p_wr1 (adp 2).
-    # Zero QBs drafted in next 2 picks, so QB1 (340.0) is still expected.
-    best_next = estimate_best_at_next_turn("QB", sample_available_players, 2)
-    assert best_next == 340.0
+    # If 2 picks until turn, probabilistic ADP survival expected value incorporates top 3 QBs
+    best_next = estimate_best_at_next_turn("QB", sample_available_players, 2, current_pick=1)
+    assert 330.0 <= best_next <= 340.0
 
 
 def test_opportunity_cost_raw(sample_available_players):

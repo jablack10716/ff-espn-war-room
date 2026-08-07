@@ -8,9 +8,11 @@ and combines them into deterministic, auditable composite candidate rankings.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any, Dict, List, Optional, Sequence
 
 from engine.scoring_models import (
+    calculate_effective_starters,
     calculate_fcvs_raw,
     calculate_hli_raw,
     calculate_roster_fit,
@@ -37,12 +39,13 @@ def estimate_best_at_next_turn(
     position: str,
     available_players: Sequence[Dict[str, Any]],
     picks_until_next_turn: int,
+    current_pick: int = 1,
 ) -> float:
-    """Estimate expected best projection median remaining at next turn.
+    """Estimate expected best projection median remaining at next turn using ADP survival probability.
 
-    Simulates the drafting of `picks_until_next_turn` players using ADP ranking.
-    Counts how many players of `position` would be taken in those picks ($k$),
-    and returns the projection_median of the $(k+1)$-th best player at $position$.
+    Calculates survival probabilities for top candidate players remaining at target position based on
+    ADP distance to the target pick (current_pick + picks_until_next_turn).
+    Returns weighted average median projection.
     """
     pos_players = [
         p for p in available_players
@@ -63,30 +66,34 @@ def estimate_best_at_next_turn(
     if picks_until_next_turn <= 0:
         return float(pos_players_sorted[0].get("projection_median") or 0.0)
 
-    # Sort entire available pool by ADP ASC to simulate draft run
-    all_available = [p for p in available_players if p.get("is_available", True)]
-    all_available_by_adp = sorted(
-        all_available,
-        key=lambda x: float(x.get("adp") if x.get("adp") is not None else 999.0),
-    )
+    target_pick = current_pick + picks_until_next_turn
+    top_3 = pos_players_sorted[:3]
 
-    simulated_drafted = all_available_by_adp[:picks_until_next_turn]
-    k_drafted_of_pos = sum(
-        1 for p in simulated_drafted
-        if str(p.get("position", "")).upper() == position.upper()
-    )
+    weighted_sum = 0.0
+    total_weight = 0.0
 
-    target_index = k_drafted_of_pos
-    if target_index < len(pos_players_sorted):
-        return float(pos_players_sorted[target_index].get("projection_median") or 0.0)
+    for p in top_3:
+        adp_val = float(p.get("adp") if p.get("adp") is not None else p.get("consensus_adp") if p.get("consensus_adp") is not None else 999.0)
+        proj = float(p.get("projection_median") or 0.0)
 
-    return 0.0
+        # Logistic survival probability: P(survival) = 1 / (1 + e^(-0.5 * (adp - target_pick)))
+        diff = adp_val - target_pick
+        survival_prob = 1.0 / (1.0 + math.exp(-0.5 * diff))
+
+        weighted_sum += proj * survival_prob
+        total_weight += survival_prob
+
+    if total_weight > 0:
+        return round(weighted_sum / total_weight, 4)
+
+    return float(top_3[0].get("projection_median") or 0.0)
 
 
 def calculate_opportunity_cost_raw(
     player: Dict[str, Any],
     available_players: Sequence[Dict[str, Any]],
     picks_until_next_turn: int,
+    current_pick: int = 1,
 ) -> float:
     """Calculate raw Opportunity Cost (OC) for a player.
 
@@ -94,7 +101,7 @@ def calculate_opportunity_cost_raw(
     """
     pos = str(player.get("position", "")).upper()
     median = float(player.get("projection_median") or 0.0)
-    expected_best = estimate_best_at_next_turn(pos, available_players, picks_until_next_turn)
+    expected_best = estimate_best_at_next_turn(pos, available_players, picks_until_next_turn, current_pick=current_pick)
     return round(median - expected_best, 4)
 
 
@@ -147,14 +154,40 @@ class AdaQuantEngine:
 
         user_roster = all_rosters.get(user_team_slot, [])
 
-        # Apply Expected Games Played (EGP) injury discounting prior to metrics computation
+        # Precalculate replacement level PPG per position for IR stash EGP offset
+        effective_starters = calculate_effective_starters(roster_requirements or {})
+        replacement_ppg_map: Dict[str, float] = {}
+        for pos_name in ("QB", "RB", "WR", "TE", "K", "DST"):
+            starters_count = effective_starters.get(pos_name, 1.0)
+            needed_count = int(round(num_teams * starters_count))
+            d_at_pos = drafted_counts.get(pos_name, 0)
+            r_idx = max(0, needed_count - d_at_pos)
+            pos_cand = [p for p in candidates if str(p.get("position", "")).upper() == pos_name]
+            pos_cand_sorted = sorted(pos_cand, key=lambda x: float(x.get("projection_median") or 0.0), reverse=True)
+            if r_idx < len(pos_cand_sorted):
+                base_proj = float(pos_cand_sorted[r_idx].get("projection_median") or 0.0)
+            elif pos_cand_sorted:
+                base_proj = float(pos_cand_sorted[-1].get("projection_median") or 0.0)
+            else:
+                base_proj = 0.0
+            replacement_ppg_map[pos_name] = base_proj / 17.0
+
+        # Apply Expected Games Played (EGP) injury discounting with IR Stash replacement offset
         candidates_egp: List[Dict[str, Any]] = []
         for p in candidates:
             p_copy = dict(p)
             inj = str(p_copy.get("injury_status") or "ACTIVE").upper()
             mult = INJURY_EGP_MULTIPLIERS.get(inj, 1.0)
             raw_proj = float(p_copy.get("projection_median") or 0.0)
-            p_copy["projection_median"] = round(raw_proj * mult, 2)
+            pos_str = str(p_copy.get("position", "")).upper()
+
+            expected_games = 17.0 * mult
+            missed_games = 17.0 - expected_games
+            healthy_ppg = raw_proj / 17.0
+            repl_ppg = replacement_ppg_map.get(pos_str, 0.0)
+
+            adjusted_proj = (healthy_ppg * expected_games) + (repl_ppg * missed_games)
+            p_copy["projection_median"] = round(adjusted_proj, 2)
             candidates_egp.append(p_copy)
 
         # 1. Compute raw metric values
@@ -162,7 +195,7 @@ class AdaQuantEngine:
         for player in candidates_egp:
             pos = str(player.get("position", "")).upper()
 
-            oc_raw = calculate_opportunity_cost_raw(player, candidates_egp, picks_until_next_turn)
+            oc_raw = calculate_opportunity_cost_raw(player, candidates_egp, picks_until_next_turn, current_pick=current_pick)
             vor_raw = calculate_vor(
                 player,
                 candidates_egp,

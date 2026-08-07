@@ -19,6 +19,12 @@ from dotenv import load_dotenv
 
 LOGGER = logging.getLogger("war_room_agents")
 
+try:
+    from services.action_logger import log_action
+except ImportError:
+    def log_action(action_type: str, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        pass
+
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 SCHEMAS_DIR = Path(__file__).resolve().parent / "schemas"
 
@@ -66,22 +72,29 @@ def validate_schema(data: Dict[str, Any], schema_name: str) -> bool:
 
 
 try:
-    from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+    from tenacity import retry, retry_if_exception, retry_if_exception_type, stop_after_attempt, wait_exponential
     TENACITY_AVAILABLE = True
 except ImportError:
     TENACITY_AVAILABLE = False
 
 
 def _execute_llm_request(url: str, headers: dict, payload: dict, timeout_seconds: float) -> str:
-    response = requests.post(url, headers=headers, json=payload, timeout=timeout_seconds)
-    if response.status_code == 429:
-        raise RuntimeError("LLM API Rate Limited (HTTP 429)")
-    response.raise_for_status()
-    res_json = response.json()
-    choices = res_json.get("choices", [])
-    if choices:
-        return choices[0].get("message", {}).get("content", "")
-    return ""
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=timeout_seconds)
+        if response.status_code == 429:
+            raise RuntimeError("LLM API Rate Limited (HTTP 429)")
+        response.raise_for_status()
+        res_json = response.json()
+        choices = res_json.get("choices", [])
+        if choices:
+            return choices[0].get("message", {}).get("content", "")
+        return ""
+    except Exception as e:
+        if 'response' in locals() and hasattr(response, 'text'):
+            LOGGER.error("LLM Request Exception: %s | Response: %s", e, response.text)
+        else:
+            LOGGER.error("LLM Request Exception: %s", e)
+        raise
 
 
 def call_llm_api(
@@ -119,11 +132,12 @@ def call_llm_api(
 
     try:
         if TENACITY_AVAILABLE:
+            import requests
             @retry(
                 reraise=True,
-                stop=stop_after_attempt(3),
-                wait=wait_exponential(multiplier=0.5, min=0.5, max=3.0),
-                retry=retry_if_exception_type(Exception),
+                stop=stop_after_attempt(2),
+                wait=wait_exponential(multiplier=0.5, min=0.5, max=2.0),
+                retry=retry_if_exception(lambda e: not isinstance(e, requests.exceptions.Timeout)),
             )
             def _with_retry():
                 return _execute_llm_request(url, headers, payload, timeout_seconds)
@@ -269,6 +283,9 @@ class ArthurAgent:
         ada_top_candidates: List[Dict[str, Any]],
         timeout_seconds: float = 5.0,
     ) -> Optional[Dict[str, Any]]:
+        import time
+        t0 = time.time()
+
         cand_summary = [
             {
                 "rank": i + 1,
@@ -288,17 +305,47 @@ class ArthurAgent:
             f"Return strict JSON matching schema with keys: agent='Arthur', reasoning_2_sentences, top_3_picks, fallback_used=False."
         )
 
+        log_action("ARTHUR_SYNTHESIZE_START", f"Arthur starting synthesis with model '{self.model}'", {
+            "model": self.model,
+            "timeout_seconds": timeout_seconds,
+            "top_candidates_count": len(cand_summary),
+        })
+
         raw_response = call_llm_api(
             self.system_prompt, user_prompt, model=self.model, timeout_seconds=timeout_seconds
         )
-        if raw_response:
-            try:
-                data = json.loads(raw_response)
-                data["fallback_used"] = False
-                if validate_schema(data, "arthur_output.schema.json"):
-                    return data
-            except Exception:
-                pass
+        elapsed = round(time.time() - t0, 3)
+
+        if not raw_response:
+            log_action("ARTHUR_SYNTHESIZE_FAILED", f"Arthur API call returned None (timeout or error after {elapsed}s)", {
+                "model": self.model,
+                "elapsed_seconds": elapsed,
+                "timeout_allocated": timeout_seconds,
+            })
+            return None
+
+        try:
+            data = json.loads(raw_response)
+            data["fallback_used"] = False
+            is_valid = validate_schema(data, "arthur_output.schema.json")
+            if is_valid:
+                log_action("ARTHUR_SYNTHESIZE_SUCCESS", f"Arthur synthesis succeeded in {elapsed}s", {
+                    "model": self.model,
+                    "elapsed_seconds": elapsed,
+                    "reasoning": data.get("reasoning_2_sentences"),
+                })
+                return data
+            else:
+                log_action("ARTHUR_SCHEMA_INVALID", f"Arthur response failed JSON schema validation in {elapsed}s", {
+                    "model": self.model,
+                    "raw_response_snippet": raw_response[:300],
+                })
+        except Exception as exc:
+            log_action("ARTHUR_PARSE_ERROR", f"Arthur JSON parsing failed in {elapsed}s: {exc}", {
+                "model": self.model,
+                "error": str(exc),
+                "raw_response_snippet": raw_response[:300],
+            })
 
         return None
 
@@ -315,10 +362,6 @@ class WarRoomOrchestrator:
         self.marcus = MarcusAgent(model=marcus_model)
         self.winston = WinstonAgent(model=winston_model)
         self.arthur = ArthurAgent(model=arthur_model)
-
-    def should_trigger(self, picks_until_user_turn: int) -> bool:
-        """Trigger agent graph when user turn is within 2 picks."""
-        return picks_until_user_turn <= 2
 
     def build_fallback_payload(
         self, ada_rankings: List[Dict[str, Any]]
@@ -354,6 +397,8 @@ class WarRoomOrchestrator:
         # Attach UI notes
         arthur_strict_payload["marcus_notes"] = {}
         arthur_strict_payload["winston_notes"] = {}
+        arthur_strict_payload["marcus_fallback"] = True
+        arthur_strict_payload["winston_fallback"] = True
         return arthur_strict_payload
 
     def run_batched_evaluations(
@@ -361,12 +406,13 @@ class WarRoomOrchestrator:
         top_candidates: List[Dict[str, Any]],
         user_roster: List[Dict[str, Any]],
         timeout_seconds: float = 6.0,
-    ) -> Tuple[Dict[str, str], Dict[str, str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    ) -> Tuple[Dict[str, str], Dict[str, str], List[Dict[str, Any]], List[Dict[str, Any]], bool]:
         """Run a single batched API call for Marcus and Winston evaluations to respect API rate limits."""
         marcus_notes: Dict[str, str] = {}
         winston_notes: Dict[str, str] = {}
         marcus_list: List[Dict[str, Any]] = []
         winston_list: List[Dict[str, Any]] = []
+        marcus_winston_success = False
 
         # Populate baseline position-aware fallbacks first
         for p in top_candidates:
@@ -415,10 +461,11 @@ class WarRoomOrchestrator:
                             if pid and item.get("need_sentence"):
                                 winston_notes[pid] = item["need_sentence"]
                                 winston_list.append({"agent": "Winston", "player_id": pid, "need_sentence": item["need_sentence"]})
+                        marcus_winston_success = True
                 except Exception as exc:
                     LOGGER.warning("Failed to parse batched evaluation response: %s", exc)
 
-        return marcus_notes, winston_notes, marcus_list, winston_list
+        return marcus_notes, winston_notes, marcus_list, winston_list, marcus_winston_success
 
     def run_orchestration(
         self,
@@ -432,31 +479,54 @@ class WarRoomOrchestrator:
         t_start = time.time()
 
         if not ada_rankings:
-            return self.build_fallback_payload([])
+            fallback_payload = self.build_fallback_payload([])
+            fallback_payload["marcus_fallback"] = True
+            fallback_payload["winston_fallback"] = True
+            return fallback_payload
 
         top_candidates = ada_rankings[:3]
-        batched_timeout = min(6.0, timeout_seconds * 0.5)
+        batched_timeout = max(6.0, min(10.0, timeout_seconds * 0.5))
 
+        marcus_winston_success = False
         try:
-            marcus_notes, winston_notes, marcus_list, winston_list = self.run_batched_evaluations(
+            marcus_notes, winston_notes, marcus_list, winston_list, marcus_winston_success = self.run_batched_evaluations(
                 top_candidates, user_roster, timeout_seconds=batched_timeout
             )
 
-            # Dynamic synthesis timeout: use whatever time remains from total budget
+            # Dynamic synthesis timeout: use whatever time remains from total budget with a minimum of 8s
             elapsed = time.time() - t_start
-            synthesis_timeout = max(2.0, timeout_seconds - elapsed)
+            synthesis_timeout = max(8.0, timeout_seconds - elapsed)
 
             arthur_res = self.arthur.synthesize(marcus_list, winston_list, ada_rankings, timeout_seconds=synthesis_timeout)
+            elapsed_total = round(time.time() - t_start, 3)
+
             if arthur_res and arthur_res.get("top_3_picks"):
                 arthur_res["marcus_notes"] = marcus_notes
                 arthur_res["winston_notes"] = winston_notes
                 arthur_res["fallback_used"] = False
+                arthur_res["marcus_fallback"] = not marcus_winston_success
+                arthur_res["winston_fallback"] = not marcus_winston_success
+
+                log_action("ORCHESTRATION_COMPLETE", f"Orchestration completed successfully in {elapsed_total}s", {
+                    "marcus_fallback": not marcus_winston_success,
+                    "winston_fallback": not marcus_winston_success,
+                    "arthur_fallback": False,
+                    "total_elapsed_seconds": elapsed_total,
+                })
                 return arthur_res
+            else:
+                log_action("ORCHESTRATION_ARTHUR_FALLBACK", f"Arthur synthesis returned None; triggering fallback in {elapsed_total}s", {
+                    "marcus_winston_success": marcus_winston_success,
+                    "total_elapsed_seconds": elapsed_total,
+                })
 
         except Exception as exc:
             LOGGER.warning("Agent orchestration error or timeout: %s", exc)
+            log_action("ORCHESTRATION_ERROR", f"Agent orchestration error: {exc}", {"error": str(exc)})
 
         fallback_payload = self.build_fallback_payload(ada_rankings)
         fallback_payload["marcus_notes"] = marcus_notes if 'marcus_notes' in locals() else {}
         fallback_payload["winston_notes"] = winston_notes if 'winston_notes' in locals() else {}
+        fallback_payload["marcus_fallback"] = not marcus_winston_success
+        fallback_payload["winston_fallback"] = not marcus_winston_success
         return fallback_payload

@@ -95,15 +95,15 @@ def render_draft_board(
                 st.success(f"Logged pick: {player['full_name']}")
 
     with col_actions:
-        st.markdown("### Controls")
-        if st.button("⏪ Undo Last Pick", use_container_width=True):
-            on_undo_last_pick()
-
-        if st.button("🗑️ Reset / Clear Draft", use_container_width=True):
-            if on_reset_draft:
-                on_reset_draft()
-
         if is_mock_mode:
+            st.markdown("### Controls")
+            if st.button("⏪ Undo Last Pick", use_container_width=True):
+                on_undo_last_pick()
+
+            if st.button("🗑️ Reset / Clear Draft", use_container_width=True):
+                if on_reset_draft:
+                    on_reset_draft()
+
             st.markdown("---")
             st.markdown("**Mock Simulator Controls**")
 

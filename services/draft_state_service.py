@@ -15,6 +15,12 @@ from services.supabase_client import get_supabase_client
 
 LOGGER = logging.getLogger("draft_state_service")
 
+try:
+    from services.action_logger import log_action
+except ImportError:
+    def log_action(action_type: str, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        pass
+
 
 class DraftStateService:
     """Manages active draft state, pick events, and player availability."""
@@ -104,6 +110,9 @@ class DraftStateService:
         notes: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Record a new player draft pick event and set player unavailable."""
+        db_source = source if source in ("manual", "system") else "manual"
+        db_notes = notes or ("Pre-draft keeper" if source == "keeper" else None)
+
         event_payload = {
             "draft_id": draft_id,
             "pick_no": pick_no,
@@ -115,9 +124,17 @@ class DraftStateService:
             "position": position,
             "picked_by_user": picked_by_user,
             "event_type": "PICK",
-            "source": source,
-            "notes": notes,
+            "source": db_source,
+            "notes": db_notes,
         }
+
+        log_action("SERVICE_RECORD_PICK_START", f"Recording pick #{pick_no} for {player_name}", {
+            "draft_id": draft_id,
+            "pick_no": pick_no,
+            "player_id": player_id,
+            "source": db_source,
+            "use_supabase": self.use_supabase,
+        })
 
         if self.use_supabase:
             try:
@@ -132,18 +149,21 @@ class DraftStateService:
                     "p_position": position,
                     "p_team_name": team_name or f"Team {team_slot}",
                     "p_picked_by_user": picked_by_user,
-                    "p_source": source,
-                    "p_notes": notes,
+                    "p_source": db_source,
+                    "p_notes": db_notes,
                 }
                 res = client.rpc("record_pick_atomic", rpc_params).execute()
                 if res.data and isinstance(res.data, dict):
                     if not res.data.get("success", True):
                         raise RuntimeError(res.data.get("message", "Database rejected atomic pick"))
                     if "pick" in res.data and res.data["pick"]:
+                        log_action("SERVICE_RPC_SUCCESS", f"RPC saved pick #{pick_no}")
                         return dict(res.data["pick"])
+                log_action("SERVICE_RPC_SUCCESS", f"RPC saved pick #{pick_no}")
                 return event_payload
             except Exception as exc:
-                LOGGER.warning("RPC record_pick_atomic failed, executing fallback direct upsert: %s", exc)
+                LOGGER.warning("RPC record_pick_atomic failed, executing fallback direct write: %s", exc)
+                log_action("SERVICE_RPC_FAILED", f"RPC failed, running direct write fallback: {exc}")
                 try:
                     # 1. Update player availability if replacing a player in this slot
                     existing = client.table("draft_log").select("player_id").eq("draft_id", draft_id).eq("pick_no", pick_no).execute()
@@ -155,8 +175,9 @@ class DraftStateService:
                     # 2. Mark new player unavailable
                     client.table("available_players").update({"is_available": False}).eq("player_id", player_id).execute()
 
-                    # 3. Direct upsert into draft_log table
-                    client.table("draft_log").upsert({
+                    # 3. Clean replace: delete any existing pick in this slot, then insert new row
+                    client.table("draft_log").delete().eq("draft_id", draft_id).eq("pick_no", pick_no).execute()
+                    insert_res = client.table("draft_log").insert({
                         "draft_id": draft_id,
                         "pick_no": pick_no,
                         "round_no": round_no,
@@ -166,13 +187,16 @@ class DraftStateService:
                         "position": position,
                         "team_name": team_name or f"Team {team_slot}",
                         "picked_by_user": picked_by_user,
-                        "source": source,
-                        "notes": notes,
-                    }, on_conflict="draft_id, pick_no").execute()
+                        "event_type": "PICK",
+                        "source": db_source,
+                        "notes": db_notes,
+                    }).execute()
 
+                    log_action("SERVICE_DIRECT_WRITE_SUCCESS", f"Direct write saved pick #{pick_no} to Supabase", {"inserted": str(insert_res.data)})
                     return event_payload
                 except Exception as inner_exc:
-                    LOGGER.error("Direct table upsert fallback also failed: %s", inner_exc)
+                    LOGGER.error("Direct table write fallback also failed: %s", inner_exc)
+                    log_action("SERVICE_DIRECT_WRITE_ERROR", f"Direct table write failed: {inner_exc}", {"error": str(inner_exc)})
                     # Local fallback to memory cache to keep application responsive
                     with self._lock:
                         self._local_draft_log.setdefault(draft_id, []).append(event_payload)

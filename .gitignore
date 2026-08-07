@@ -30,6 +30,7 @@ dist/
 
 # Logs
 *.log
+chrome-debug/
 
 # OS specific files
 .DS_Store

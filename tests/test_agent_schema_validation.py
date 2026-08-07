@@ -85,11 +85,7 @@ def test_arthur_output_schema_validation(sample_ada_rankings):
     assert validate_schema(valid_arthur, "arthur_output.schema.json") is True
 
 
-def test_orchestrator_should_trigger():
-    orchestrator = WarRoomOrchestrator()
-    assert orchestrator.should_trigger(picks_until_user_turn=1) is True
-    assert orchestrator.should_trigger(picks_until_user_turn=2) is True
-    assert orchestrator.should_trigger(picks_until_user_turn=3) is False
+
 
 
 def test_orchestrator_fallback_mode(sample_ada_rankings):

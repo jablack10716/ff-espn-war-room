@@ -240,18 +240,24 @@ class AdaQuantEngine:
             prv_n = prv_norms[idx]
             rfit_n = rfit_norms[idx]
 
-            # Decouple HLI for non-RBs without inflating w_oc or w_vor
+            # Extract HLI multiplier (applies post-calculation for running backs)
+            hli_mult = 1.0
+            if pos == "RB":
+                median = float(player.get("projection_median") or 0.0)
+                hli_raw = raw_metrics[idx]["hli_raw"]
+                if median > 0:
+                    hli_mult = round(hli_raw / median, 4)
+
+            # Static component weights across all positions
             w_oc = base_w_oc
             w_vor = base_w_vor
-            w_hli = base_w_hli if pos == "RB" else 0.0
             w_fcvs = base_w_fcvs
+            w_hli = base_w_hli if pos == "RB" else 0.0
             w_prv = base_w_prv
             w_rfit = base_w_rfit
 
-            composite_score = round(
-                w_oc * oc_n + w_vor * vor_n + w_fcvs * fcvs_n + w_hli * hli_n + w_prv * prv_n + w_rfit * rfit_n,
-                4,
-            )
+            base_sum = w_oc * oc_n + w_vor * vor_n + w_fcvs * fcvs_n + w_hli * hli_n + w_prv * prv_n + w_rfit * rfit_n
+            composite_score = round(base_sum * hli_mult, 4)
 
             results.append({
                 "player_id": player.get("player_id"),

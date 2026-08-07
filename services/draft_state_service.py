@@ -122,30 +122,69 @@ class DraftStateService:
         if self.use_supabase:
             try:
                 client = get_supabase_client()
-                # Insert pick event with schema constraint fallback
-                try:
-                    res_log = client.table("draft_log").insert(event_payload).execute()
-                except Exception as exc:
-                    if "source" in str(exc).lower() or "check constraint" in str(exc).lower():
-                        LOGGER.warning("Supabase schema check constraint hit for source='%s'. Retrying with source='import'", source)
-                        fallback_payload = dict(event_payload)
-                        fallback_payload["source"] = "import"
-                        res_log = client.table("draft_log").insert(fallback_payload).execute()
-                    else:
-                        raise
-
-                # Mark player unavailable
-                client.table("available_players").update({"is_available": False}).eq("player_id", player_id).execute()
-                if res_log.data:
-                    return dict(res_log.data[0])
+                rpc_params = {
+                    "p_draft_id": draft_id,
+                    "p_pick_no": pick_no,
+                    "p_round_no": round_no,
+                    "p_team_slot": team_slot,
+                    "p_player_id": player_id,
+                    "p_player_name": player_name,
+                    "p_position": position,
+                    "p_team_name": team_name or f"Team {team_slot}",
+                    "p_picked_by_user": picked_by_user,
+                    "p_source": source,
+                    "p_notes": notes,
+                }
+                res = client.rpc("record_pick_atomic", rpc_params).execute()
+                if res.data and isinstance(res.data, dict):
+                    if not res.data.get("success", True):
+                        raise RuntimeError(res.data.get("message", "Database rejected atomic pick"))
+                    if "pick" in res.data and res.data["pick"]:
+                        return dict(res.data["pick"])
+                return event_payload
             except Exception as exc:
-                LOGGER.error("Failed to write pick to Supabase: %s", exc)
-                raise RuntimeError(f"Failed to write pick #{pick_no} to Supabase: {exc}") from exc
+                LOGGER.warning("RPC record_pick_atomic failed, executing fallback direct upsert: %s", exc)
+                try:
+                    # 1. Update player availability if replacing a player in this slot
+                    existing = client.table("draft_log").select("player_id").eq("draft_id", draft_id).eq("pick_no", pick_no).execute()
+                    if existing.data and len(existing.data) > 0:
+                        old_pid = existing.data[0].get("player_id")
+                        if old_pid and old_pid != player_id:
+                            client.table("available_players").update({"is_available": True}).eq("player_id", old_pid).execute()
 
-            # Local cache update (non-Supabase mode)
-        self._local_draft_log.setdefault(draft_id, []).append(event_payload)
-        if player_id in self._local_available_players:
-            self._local_available_players[player_id]["is_available"] = False
+                    # 2. Mark new player unavailable
+                    client.table("available_players").update({"is_available": False}).eq("player_id", player_id).execute()
+
+                    # 3. Direct upsert into draft_log table
+                    client.table("draft_log").upsert({
+                        "draft_id": draft_id,
+                        "pick_no": pick_no,
+                        "round_no": round_no,
+                        "team_slot": team_slot,
+                        "player_id": player_id,
+                        "player_name": player_name,
+                        "position": position,
+                        "team_name": team_name or f"Team {team_slot}",
+                        "picked_by_user": picked_by_user,
+                        "source": source,
+                        "notes": notes,
+                    }, on_conflict="draft_id, pick_no").execute()
+
+                    return event_payload
+                except Exception as inner_exc:
+                    LOGGER.error("Direct table upsert fallback also failed: %s", inner_exc)
+                    # Local fallback to memory cache to keep application responsive
+                    with self._lock:
+                        self._local_draft_log.setdefault(draft_id, []).append(event_payload)
+                        if player_id in self._local_available_players:
+                            self._local_available_players[player_id]["is_available"] = False
+                    return event_payload
+
+        # Local cache update (non-Supabase mode or local fallback)
+        with self._lock:
+            self._local_draft_log.setdefault(draft_id, []).append(event_payload)
+            if player_id in self._local_available_players:
+                self._local_available_players[player_id]["is_available"] = False
 
         return event_payload
 
@@ -163,10 +202,7 @@ class DraftStateService:
         source: str = "manual",
         notes: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create or replace a pick at pick_no without leaving the slot blank on failures.
-
-        For Supabase mode, updates the existing row in place when present.
-        """
+        """Create or replace a pick at pick_no using atomic DB RPC or thread-safe local cache."""
         event_payload = {
             "draft_id": draft_id,
             "pick_no": pick_no,
@@ -183,51 +219,6 @@ class DraftStateService:
         }
 
         if self.use_supabase:
-            client = get_supabase_client()
-            existing: Optional[Dict[str, Any]] = None
-
-            try:
-                existing_res = (
-                    client.table("draft_log")
-                    .select("*")
-                    .eq("draft_id", draft_id)
-                    .eq("pick_no", pick_no)
-                    .order("created_at", desc=True)
-                    .limit(1)
-                    .execute()
-                )
-                if existing_res.data:
-                    existing = dict(existing_res.data[0])
-            except Exception as exc:
-                LOGGER.warning("Failed to read existing pick for upsert; falling back to insert: %s", exc)
-
-            if existing and existing.get("event_id") is not None:
-                try:
-                    old_player_id = existing.get("player_id")
-
-                    update_payload = dict(event_payload)
-                    update_payload.pop("draft_id", None)
-                    update_payload.pop("pick_no", None)
-
-                    res_log = (
-                        client.table("draft_log")
-                        .update(update_payload)
-                        .eq("event_id", existing["event_id"])
-                        .execute()
-                    )
-
-                    if old_player_id and str(old_player_id) != str(player_id):
-                        client.table("available_players").update({"is_available": True}).eq("player_id", old_player_id).execute()
-
-                    client.table("available_players").update({"is_available": False}).eq("player_id", player_id).execute()
-
-                    if res_log.data:
-                        return dict(res_log.data[0])
-                    return event_payload
-                except Exception as exc:
-                    LOGGER.error("Failed to update existing pick in Supabase: %s", exc)
-                    raise RuntimeError(f"Failed to update pick #{pick_no} in Supabase: {exc}") from exc
-
             return self.record_pick(
                 draft_id=draft_id,
                 pick_no=pick_no,
@@ -242,25 +233,26 @@ class DraftStateService:
                 notes=notes,
             )
 
-        local_log = self._local_draft_log.setdefault(draft_id, [])
-        existing_idx: Optional[int] = None
-        existing_entry: Optional[Dict[str, Any]] = None
-        for idx, e in enumerate(local_log):
-            if int(e.get("pick_no", -1)) == int(pick_no):
-                existing_idx = idx
-                existing_entry = e
-                break
+        with self._lock:
+            local_log = self._local_draft_log.setdefault(draft_id, [])
+            existing_idx: Optional[int] = None
+            existing_entry: Optional[Dict[str, Any]] = None
+            for idx, e in enumerate(local_log):
+                if int(e.get("pick_no", -1)) == int(pick_no):
+                    existing_idx = idx
+                    existing_entry = e
+                    break
 
-        if existing_idx is not None:
-            old_player_id = existing_entry.get("player_id") if existing_entry else None
-            local_log[existing_idx] = event_payload
-            if old_player_id and str(old_player_id) != str(player_id) and old_player_id in self._local_available_players:
-                self._local_available_players[old_player_id]["is_available"] = True
-        else:
-            local_log.append(event_payload)
+            if existing_idx is not None:
+                old_player_id = existing_entry.get("player_id") if existing_entry else None
+                local_log[existing_idx] = event_payload
+                if old_player_id and str(old_player_id) != str(player_id) and old_player_id in self._local_available_players:
+                    self._local_available_players[old_player_id]["is_available"] = True
+            else:
+                local_log.append(event_payload)
 
-        if player_id in self._local_available_players:
-            self._local_available_players[player_id]["is_available"] = False
+            if player_id in self._local_available_players:
+                self._local_available_players[player_id]["is_available"] = False
 
         return event_payload
 
@@ -292,14 +284,15 @@ class DraftStateService:
                 LOGGER.error("Failed to execute atomic undo in Supabase: %s", exc)
 
         # Local cache rollback
-        if draft_id in self._local_draft_log:
-            self._local_draft_log[draft_id] = [
-                e for e in self._local_draft_log[draft_id]
-                if int(e.get("pick_no", 0)) != int(latest_pick["pick_no"])
-            ]
+        with self._lock:
+            if draft_id in self._local_draft_log:
+                self._local_draft_log[draft_id] = [
+                    e for e in self._local_draft_log[draft_id]
+                    if int(e.get("pick_no", 0)) != int(latest_pick["pick_no"])
+                ]
 
-        if player_id and player_id in self._local_available_players:
-            self._local_available_players[player_id]["is_available"] = True
+            if player_id and player_id in self._local_available_players:
+                self._local_available_players[player_id]["is_available"] = True
 
         return latest_pick
 
@@ -327,14 +320,15 @@ class DraftStateService:
             except Exception as exc:
                 LOGGER.error("Failed to delete specific pick in Supabase: %s", exc)
 
-        if draft_id in self._local_draft_log:
-            self._local_draft_log[draft_id] = [
-                e for e in self._local_draft_log[draft_id]
-                if int(e.get("pick_no", 0)) != int(pick_no)
-            ]
+        with self._lock:
+            if draft_id in self._local_draft_log:
+                self._local_draft_log[draft_id] = [
+                    e for e in self._local_draft_log[draft_id]
+                    if int(e.get("pick_no", 0)) != int(pick_no)
+                ]
 
-        if player_id and player_id in self._local_available_players:
-            self._local_available_players[player_id]["is_available"] = True
+            if player_id and player_id in self._local_available_players:
+                self._local_available_players[player_id]["is_available"] = True
 
         return target_pick
 
@@ -350,9 +344,10 @@ class DraftStateService:
                 LOGGER.error("Failed to reset draft in Supabase: %s", exc)
 
         # Reset local cache
-        self._local_draft_log[draft_id] = []
-        for p in self._local_available_players.values():
-            p["is_available"] = True
+        with self._lock:
+            self._local_draft_log[draft_id] = []
+            for p in self._local_available_players.values():
+                p["is_available"] = True
 
         return True
 

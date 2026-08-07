@@ -20,30 +20,43 @@ AS $$
 DECLARE
     v_player record;
     v_pick record;
+    v_existing_player_id TEXT;
 BEGIN
-    -- 1. Lock the player row in available_players for UPDATE
+    -- 1. Check if pick already exists at this slot
+    SELECT player_id INTO v_existing_player_id
+    FROM public.draft_log
+    WHERE draft_id = p_draft_id AND pick_no = p_pick_no;
+
+    -- 2. Lock the new player row in available_players for UPDATE
     SELECT * INTO v_player
     FROM public.available_players
     WHERE player_id = p_player_id
     FOR UPDATE;
 
-    -- If player doesn't exist or is already taken (not available), return failure
+    -- If player doesn't exist or is already taken by another pick slot, return failure
     IF NOT FOUND THEN
         -- Allow recording unknown/placeholder players even if not in pool
         NULL;
-    ELSIF NOT v_player.is_available THEN
+    ELSIF NOT v_player.is_available AND (v_existing_player_id IS NULL OR v_existing_player_id != p_player_id) THEN
         RETURN jsonb_build_object(
             'success', false,
             'message', 'Player already drafted'
         );
     ELSE
-        -- Mark player unavailable
+        -- Mark new player unavailable
         UPDATE public.available_players
         SET is_available = FALSE
         WHERE player_id = p_player_id;
     END IF;
 
-    -- 2. Insert into draft_log
+    -- 3. If there was a different player in this slot, restore their availability
+    IF v_existing_player_id IS NOT NULL AND v_existing_player_id != p_player_id THEN
+        UPDATE public.available_players
+        SET is_available = TRUE
+        WHERE player_id = v_existing_player_id;
+    END IF;
+
+    -- 4. Insert into draft_log
     INSERT INTO public.draft_log (
         draft_id,
         pick_no,

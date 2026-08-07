@@ -59,3 +59,20 @@ def test_get_round_and_slot_from_pick_no():
     r, s = _get_round_and_slot_from_pick_no(24, num_teams=12, is_3rr=False)
     assert (r, s) == (2, 1)
 
+    # 3RR Snake draft tests (12 teams)
+    # R1 Pick 1 -> (1, 1), Pick 12 -> (1, 12)
+    assert _get_round_and_slot_from_pick_no(1, 12, is_3rr=True) == (1, 1)
+    assert _get_round_and_slot_from_pick_no(12, 12, is_3rr=True) == (1, 12)
+
+    # R2 Pick 13 -> (2, 12), Pick 24 -> (2, 1) (Reversed)
+    assert _get_round_and_slot_from_pick_no(13, 12, is_3rr=True) == (2, 12)
+    assert _get_round_and_slot_from_pick_no(24, 12, is_3rr=True) == (2, 1)
+
+    # R3 Pick 25 -> (3, 12), Pick 36 -> (3, 1) (Reversed again for 3RR)
+    assert _get_round_and_slot_from_pick_no(25, 12, is_3rr=True) == (3, 12)
+    assert _get_round_and_slot_from_pick_no(36, 12, is_3rr=True) == (3, 1)
+
+    # R4 Pick 37 -> (4, 1), Pick 48 -> (4, 12) (Standard alternating resumes - Forward)
+    assert _get_round_and_slot_from_pick_no(37, 12, is_3rr=True) == (4, 1)
+    assert _get_round_and_slot_from_pick_no(48, 12, is_3rr=True) == (4, 12)
+

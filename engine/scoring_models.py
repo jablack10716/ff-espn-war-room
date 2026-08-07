@@ -50,6 +50,16 @@ def z_score_normalize(values: Sequence[float]) -> List[float]:
     return [(v - mean) / std_dev for v in values]
 
 
+POSITION_VARIANCE: Dict[str, Dict[str, float]] = {
+    "QB": {"floor_mult": 0.88, "ceil_mult": 1.12},
+    "RB": {"floor_mult": 0.75, "ceil_mult": 1.30},
+    "WR": {"floor_mult": 0.78, "ceil_mult": 1.28},
+    "TE": {"floor_mult": 0.72, "ceil_mult": 1.35},
+    "K": {"floor_mult": 0.80, "ceil_mult": 1.20},
+    "DST": {"floor_mult": 0.70, "ceil_mult": 1.40},
+}
+
+
 def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
     """Calculate raw Floor-to-Ceiling Variance Shift score based on draft round.
 
@@ -57,12 +67,15 @@ def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
     Rounds 6-9: 50% floor, 50% ceiling
     Rounds 10+: 10% floor, 90% ceiling
     """
+    pos = str(player.get("position", "")).upper()
+    pos_var = POSITION_VARIANCE.get(pos, {"floor_mult": 0.85, "ceil_mult": 1.15})
+
     median = float(player.get("projection_median") or 0.0)
     floor = player.get("projection_floor")
     ceiling = player.get("projection_ceiling")
 
-    floor_val = float(floor) if floor is not None else max(0.0, median * 0.85)
-    ceiling_val = float(ceiling) if ceiling is not None else max(median, median * 1.15)
+    floor_val = float(floor) if floor is not None else max(0.0, median * pos_var["floor_mult"])
+    ceiling_val = float(ceiling) if ceiling is not None else max(median, median * pos_var["ceil_mult"])
 
     w_floor = max(0.10, round(0.90 - 0.08 * (round_no - 1), 4))
     w_ceiling = round(1.0 - w_floor, 4)

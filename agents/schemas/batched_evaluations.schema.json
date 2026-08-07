@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BatchedEvaluations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evaluations"],
+  "properties": {
+    "evaluations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["player_id", "upside_sentence", "need_sentence"],
+        "properties": {
+          "player_id": { "type": "string", "minLength": 1 },
+          "upside_sentence": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 350
+          },
+          "need_sentence": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 350
+          }
+        }
+      }
+    }
+  }
+}

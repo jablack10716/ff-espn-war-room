@@ -76,6 +76,8 @@ def init_session_state() -> None:
         st.session_state.fallback_mode = False
     if "keeper_expander_open" not in st.session_state:
         st.session_state.keeper_expander_open = False
+    if "draft_started" not in st.session_state:
+        st.session_state.draft_started = False
 
 
 @st.cache_resource
@@ -127,6 +129,9 @@ def main() -> None:
             },
         )
 
+        pick_source = "keeper" if not st.session_state.get("draft_started", False) else "manual"
+        pick_notes = "Pre-draft keeper" if not st.session_state.get("draft_started", False) else None
+
         try:
             upsert_pick = getattr(service, "upsert_pick", None)
             if callable(upsert_pick):
@@ -140,6 +145,8 @@ def main() -> None:
                     position=position,
                     team_name=team_name,
                     picked_by_user=picked_by_user,
+                    source=pick_source,
+                    notes=pick_notes,
                 )
             else:
                 LOGGER.warning("DraftStateService.upsert_pick unavailable at runtime; falling back to record_pick")
@@ -153,6 +160,8 @@ def main() -> None:
                     position=position,
                     team_name=team_name,
                     picked_by_user=picked_by_user,
+                    source=pick_source,
+                    notes=pick_notes,
                 )
             st.session_state.flash_notification = (
                 "success",
@@ -548,13 +557,33 @@ def main() -> None:
     # Load canonical state
     available_players, draft_log = service.reconcile_state(st.session_state.draft_id)
 
-    # Current pick calculation (first unassigned pick_no)
+    # Current pick calculation (Pre-Draft Keeper setup vs Live Draft Progress)
     taken_pick_nos = {
         int(e.get("pick_no"))
         for e in draft_log
         if str(e.get("event_type", "PICK")).upper() == "PICK" and e.get("pick_no") is not None
     }
-    current_pick = max(taken_pick_nos) + 1 if taken_pick_nos else 1
+    live_pick_nos = {
+        int(e.get("pick_no"))
+        for e in draft_log
+        if str(e.get("event_type", "PICK")).upper() == "PICK"
+        and e.get("pick_no") is not None
+        and str(e.get("source", "")).lower() != "keeper"
+        and "keeper" not in str(e.get("notes", "")).lower()
+    }
+
+    is_draft_started = st.session_state.get("draft_started", False)
+
+    if not is_draft_started or not live_pick_nos:
+        # Pre-draft mode: start at the first unassigned pick slot starting from Pick 1
+        current_pick = 1
+        while current_pick in taken_pick_nos:
+            current_pick += 1
+    else:
+        # Live draft in progress: clock remains anchored after the highest live pick made
+        current_pick = max(live_pick_nos) + 1
+        while current_pick in taken_pick_nos:
+            current_pick += 1
 
     current_round = ((current_pick - 1) // st.session_state.num_teams) + 1
 
@@ -568,26 +597,32 @@ def main() -> None:
             # 3rd Round Reversal logic
             if r == 1:
                 is_even = False
+            elif r in (2, 3):
+                is_even = True
             else:
-                is_even = (r % 2 == 1)  # Round 2 & 3 are both reversed (N -> 1)
+                is_even = (r % 2 == 1)
         else:
             is_even = (r % 2 == 0)
 
         return (num - p_in_r) if is_even else (p_in_r + 1)
 
-    # Calculate distance to user turn
+    # Calculate distance to user turn (counting open/unassigned picks)
     user_slot = st.session_state.user_team_slot
     picks_until_user_turn = 0
     cur_check = current_pick
-    while cur_check < current_pick + 20:
-        if get_slot_for_pick(cur_check) == user_slot:
-            picks_until_user_turn = cur_check - current_pick
-            break
+    live_steps = 0
+    while cur_check < current_pick + 250:
+        if cur_check not in taken_pick_nos:
+            if get_slot_for_pick(cur_check) == user_slot:
+                picks_until_user_turn = live_steps
+                break
+            live_steps += 1
         cur_check += 1
 
     # Simulator Callbacks
 
     def handle_simulate_pick() -> None:
+        st.session_state.draft_started = True
         calc_slot = get_slot_for_pick(current_pick)
         simulated = service.simulate_opponent_pick(
             draft_id=st.session_state.draft_id,
@@ -600,14 +635,21 @@ def main() -> None:
         st.rerun()
 
     def handle_simulate_to_user_turn() -> None:
+        st.session_state.draft_started = True
         max_picks = 250
         cur_p = current_pick
         simulated_count = 0
         simulated_names = []
         while cur_p < max_picks:
+            # Skip pick slots that are already filled (e.g. by keepers)
+            if cur_p in taken_pick_nos:
+                cur_p += 1
+                continue
+
             c_slot = get_slot_for_pick(cur_p)
             if c_slot == st.session_state.user_team_slot and simulated_count > 0:
                 break
+
             c_round = ((cur_p - 1) // st.session_state.num_teams) + 1
             simmed = service.simulate_opponent_pick(
                 draft_id=st.session_state.draft_id,
@@ -618,9 +660,14 @@ def main() -> None:
             if simmed:
                 simulated_count += 1
                 simulated_names.append(f"#{cur_p} {simmed.get('player_name')} ({simmed.get('position')})")
+                taken_pick_nos.add(cur_p)
             cur_p += 1
-            # Break after simulating up to user's next turn
-            if get_slot_for_pick(cur_p) == st.session_state.user_team_slot:
+
+            # Break after simulating up to user's next open turn
+            next_p = cur_p
+            while next_p in taken_pick_nos and next_p < max_picks:
+                next_p += 1
+            if get_slot_for_pick(next_p) == st.session_state.user_team_slot:
                 break
 
         if simulated_count > 0:
@@ -633,6 +680,7 @@ def main() -> None:
         st.rerun()
 
     def handle_reset_draft() -> None:
+        st.session_state.draft_started = False
         service.reset_draft(st.session_state.draft_id)
         st.toast("Reset draft state successfully.")
         st.rerun()
@@ -642,11 +690,13 @@ def main() -> None:
     # Render Mock Draft Control Bar if in Practice Mode
     if st.session_state.draft_mode == "🧪 Practice Mock Draft":
         with st.container(border=True):
+            is_in_progress = st.session_state.get("draft_started", False)
+            status_badge = "🚀 **Live Draft In Progress**" if is_in_progress else "📌 **Pre-Draft Setup (Setting Keepers)**"
             st.markdown(
-                f"🧪 **Mock Practice Control Bar** — Current Pick: **#{current_pick}** "
+                f"🧪 **Mock Practice Control Bar** — Status: {status_badge} | Current Pick: **#{current_pick}** "
                 f"(Round {current_round}, Slot {get_slot_for_pick(current_pick)})"
             )
-            m_col1, m_col2, m_col3 = st.columns([3, 2, 2])
+            m_col1, m_col2, m_col3, m_col4 = st.columns([3, 2, 2, 2])
             with m_col1:
                 if st.button("⏩ Auto-Pick All Opponents Until My Turn", type="primary", use_container_width=True, key="mock_banner_auto_pick"):
                     handle_simulate_to_user_turn()
@@ -654,6 +704,17 @@ def main() -> None:
                 if st.button("🤖 Simulate 1 Bot Pick", use_container_width=True, key="mock_banner_single_pick"):
                     handle_simulate_pick()
             with m_col3:
+                if not is_in_progress:
+                    if st.button("🚀 Start Live Draft", type="primary", use_container_width=True, key="mock_banner_start_draft"):
+                        st.session_state.draft_started = True
+                        st.toast("🚀 Live Draft Started! On the clock.", icon="🏁")
+                        st.rerun()
+                else:
+                    if st.button("📌 Return to Pre-Draft", use_container_width=True, key="mock_banner_return_predraft"):
+                        st.session_state.draft_started = False
+                        st.toast("📌 Returned to Pre-Draft Keeper Setup mode.", icon="ℹ️")
+                        st.rerun()
+            with m_col4:
                 if st.button("🗑️ Reset Mock Draft", use_container_width=True, key="mock_banner_reset"):
                     request_reset_confirmation()
                     st.rerun()

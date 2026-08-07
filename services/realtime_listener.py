@@ -24,6 +24,7 @@ class RealtimeListener:
         self.event_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
         self.is_connected = False
         self.last_event_ts: Optional[float] = None
+        self.channel: Any = None
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -52,8 +53,8 @@ class RealtimeListener:
         def _run_listener() -> None:
             try:
                 client = get_supabase_client()
-                channel = client.channel(f"realtime_draft_{self.draft_id}")
-                channel.on_postgres_changes(
+                self.channel = client.channel(f"realtime_draft_{self.draft_id}")
+                self.channel.on_postgres_changes(
                     event="*",
                     schema="public",
                     table="draft_log",
@@ -77,6 +78,13 @@ class RealtimeListener:
         """Stop listening."""
         self._stop_event.set()
         self.is_connected = False
+        if self.channel:
+            try:
+                client = get_supabase_client()
+                client.remove_channel(self.channel)
+                self.channel = None
+            except Exception as exc:
+                LOGGER.warning("Failed to unsubscribe Realtime channel: %s", exc)
 
     def poll_events(self) -> list[Dict[str, Any]]:
         """Retrieve and clear pending events from queue."""

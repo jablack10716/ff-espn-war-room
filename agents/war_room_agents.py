@@ -51,6 +51,8 @@ def validate_schema(data: Dict[str, Any], schema_name: str) -> bool:
             required = ["agent", "player_id", "upside_sentence"]
         elif schema_name == "winston_output.schema.json":
             required = ["agent", "player_id", "need_sentence"]
+        elif schema_name == "batched_evaluations.schema.json":
+            required = ["evaluations"]
         elif schema_name == "arthur_output.schema.json":
             required = ["agent", "reasoning_2_sentences", "top_3_picks", "fallback_used"]
 
@@ -98,7 +100,7 @@ def call_llm_api(
 
     url = os.getenv("GEMINI_API_URL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
     if not model:
-        model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -139,7 +141,7 @@ class MarcusAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "marcus_system.txt")
-        self.model = model or os.getenv("MARCUS_MODEL") or "gemini-flash-latest"
+        self.model = model or os.getenv("MARCUS_MODEL") or "gemini-2.5-flash"
 
     def evaluate_player(
         self, player: Dict[str, Any], timeout_seconds: float = 5.0
@@ -195,7 +197,7 @@ class WinstonAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "winston_system.txt")
-        self.model = model or os.getenv("WINSTON_MODEL") or "gemini-flash-latest"
+        self.model = model or os.getenv("WINSTON_MODEL") or "gemini-2.5-flash"
 
     def evaluate_player(
         self,
@@ -258,7 +260,7 @@ class ArthurAgent:
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.system_prompt = load_file(PROMPTS_DIR / "arthur_system.txt")
-        self.model = model or os.getenv("ARTHUR_MODEL") or "gemini-flash-latest"
+        self.model = model or os.getenv("ARTHUR_MODEL") or "gemini-2.5-pro"
 
     def synthesize(
         self,
@@ -271,9 +273,9 @@ class ArthurAgent:
             {
                 "rank": i + 1,
                 "player_id": p["player_id"],
-                "player_name": p["player_name"],
+                "player_name": p.get("player_name") or p.get("full_name"),
                 "position": p["position"],
-                "composite_score": p["composite_score"],
+                "composite_score": p.get("composite_score", 0.0),
             }
             for i, p in enumerate(ada_top_candidates[:3])
         ]
@@ -302,7 +304,7 @@ class ArthurAgent:
 
 
 class WarRoomOrchestrator:
-    """Orchestrates Fan-Out / Fan-In agent workflow with 5s timeout cap."""
+    """Orchestrates Fan-Out / Fan-In agent workflow with dynamic timeout cap."""
 
     def __init__(
         self,
@@ -327,7 +329,7 @@ class WarRoomOrchestrator:
             top_3.append({
                 "rank": i,
                 "player_id": str(p.get("player_id")),
-                "player_name": str(p.get("player_name")),
+                "player_name": str(p.get("player_name") or p.get("full_name")),
                 "position": str(p.get("position")),
                 "composite_score": float(p.get("composite_score", 0.0)),
             })
@@ -354,6 +356,70 @@ class WarRoomOrchestrator:
         arthur_strict_payload["winston_notes"] = {}
         return arthur_strict_payload
 
+    def run_batched_evaluations(
+        self,
+        top_candidates: List[Dict[str, Any]],
+        user_roster: List[Dict[str, Any]],
+        timeout_seconds: float = 6.0,
+    ) -> Tuple[Dict[str, str], Dict[str, str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Run a single batched API call for Marcus and Winston evaluations to respect API rate limits."""
+        marcus_notes: Dict[str, str] = {}
+        winston_notes: Dict[str, str] = {}
+        marcus_list: List[Dict[str, Any]] = []
+        winston_list: List[Dict[str, Any]] = []
+
+        # Populate baseline position-aware fallbacks first
+        for p in top_candidates:
+            m_eval = self.marcus.evaluate_player(p, timeout_seconds=0.01)
+            w_eval = self.winston.evaluate_player(p, user_roster, timeout_seconds=0.01)
+            pid = str(p.get("player_id"))
+            if m_eval and m_eval.get("upside_sentence"):
+                marcus_notes[pid] = m_eval["upside_sentence"]
+                marcus_list.append(m_eval)
+            if w_eval and w_eval.get("need_sentence"):
+                winston_notes[pid] = w_eval["need_sentence"]
+                winston_list.append(w_eval)
+
+        # Execute single batched API request if LLM API key present
+        if os.getenv("GEMINI_API_KEY"):
+            cand_info = [
+                {
+                    "player_id": str(p.get("player_id")),
+                    "name": p.get("full_name") or p.get("player_name"),
+                    "position": p.get("position"),
+                    "team": p.get("team"),
+                    "adp": p.get("adp"),
+                    "projection_median": p.get("projection_median"),
+                }
+                for p in top_candidates
+            ]
+            system_prompt = (
+                "You are the combined Chief Scout (Marcus) and Roster Architect (Winston) in a fantasy football draft war room.\n"
+                "Evaluate the top candidate players. For each player, produce:\n"
+                "1. upside_sentence: Exactly 1 sentence focusing on upside talent (Marcus).\n"
+                "2. need_sentence: Exactly 1 sentence focusing on roster fit and positional need (Winston).\n"
+                "Return strict JSON format matching: {'evaluations': [{'player_id': '...', 'upside_sentence': '...', 'need_sentence': '...'}]}"
+            )
+            user_prompt = f"Top candidate players: {cand_info}.\nCurrent User Roster: {user_roster}."
+
+            raw = call_llm_api(system_prompt, user_prompt, model=self.marcus.model, timeout_seconds=timeout_seconds)
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    if validate_schema(data, "batched_evaluations.schema.json"):
+                        for item in data.get("evaluations", []):
+                            pid = str(item.get("player_id"))
+                            if pid and item.get("upside_sentence"):
+                                marcus_notes[pid] = item["upside_sentence"]
+                                marcus_list.append({"agent": "Marcus", "player_id": pid, "upside_sentence": item["upside_sentence"]})
+                            if pid and item.get("need_sentence"):
+                                winston_notes[pid] = item["need_sentence"]
+                                winston_list.append({"agent": "Winston", "player_id": pid, "need_sentence": item["need_sentence"]})
+                except Exception as exc:
+                    LOGGER.warning("Failed to parse batched evaluation response: %s", exc)
+
+        return marcus_notes, winston_notes, marcus_list, winston_list
+
     def run_orchestration(
         self,
         candidate_players: List[Dict[str, Any]],
@@ -361,52 +427,26 @@ class WarRoomOrchestrator:
         ada_rankings: List[Dict[str, Any]],
         timeout_seconds: float = 15.0,
     ) -> Dict[str, Any]:
-        """Execute Fan-Out to Marcus/Winston and Fan-In to Arthur with configurable timeout cap."""
+        """Execute batched evaluations and Arthur synthesis with dynamic time budgeting."""
+        import time
+        t_start = time.time()
+
         if not ada_rankings:
             return self.build_fallback_payload([])
 
         top_candidates = ada_rankings[:3]
-
-        fan_out_timeout = round(timeout_seconds * 0.6, 2)
-        fan_in_timeout = round(timeout_seconds * 0.4, 2)
-
-        # Use ThreadPoolExecutor for parallel Fan-Out with timeout cap
-        marcus_notes: Dict[str, str] = {}
-        winston_notes: Dict[str, str] = {}
-        marcus_list: List[Dict[str, Any]] = []
-        winston_list: List[Dict[str, Any]] = []
+        batched_timeout = min(6.0, timeout_seconds * 0.5)
 
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-                futures_marcus = {
-                    executor.submit(self.marcus.evaluate_player, p, fan_out_timeout): p for p in top_candidates
-                }
-                futures_winston = {
-                    executor.submit(self.winston.evaluate_player, p, user_roster, fan_out_timeout): p for p in top_candidates
-                }
+            marcus_notes, winston_notes, marcus_list, winston_list = self.run_batched_evaluations(
+                top_candidates, user_roster, timeout_seconds=batched_timeout
+            )
 
-                # Wait for Fan-Out with proportional timeout limit
-                done_m, _ = concurrent.futures.wait(
-                    futures_marcus.keys(), timeout=fan_out_timeout
-                )
-                done_w, _ = concurrent.futures.wait(
-                    futures_winston.keys(), timeout=fan_out_timeout
-                )
+            # Dynamic synthesis timeout: use whatever time remains from total budget
+            elapsed = time.time() - t_start
+            synthesis_timeout = max(2.0, timeout_seconds - elapsed)
 
-                for fut in done_m:
-                    res = fut.result()
-                    if res and res.get("player_id") and res.get("upside_sentence"):
-                        marcus_notes[res["player_id"]] = res["upside_sentence"]
-                        marcus_list.append(res)
-
-                for fut in done_w:
-                    res = fut.result()
-                    if res and res.get("player_id") and res.get("need_sentence"):
-                        winston_notes[res["player_id"]] = res["need_sentence"]
-                        winston_list.append(res)
-
-            # Fan-In to Arthur
-            arthur_res = self.arthur.synthesize(marcus_list, winston_list, ada_rankings, timeout_seconds=fan_in_timeout)
+            arthur_res = self.arthur.synthesize(marcus_list, winston_list, ada_rankings, timeout_seconds=synthesis_timeout)
             if arthur_res and arthur_res.get("top_3_picks"):
                 arthur_res["marcus_notes"] = marcus_notes
                 arthur_res["winston_notes"] = winston_notes
@@ -416,8 +456,7 @@ class WarRoomOrchestrator:
         except Exception as exc:
             LOGGER.warning("Agent orchestration error or timeout: %s", exc)
 
-        # Fallback to Ada-Only
         fallback_payload = self.build_fallback_payload(ada_rankings)
-        fallback_payload["marcus_notes"] = marcus_notes
-        fallback_payload["winston_notes"] = winston_notes
+        fallback_payload["marcus_notes"] = marcus_notes if 'marcus_notes' in locals() else {}
+        fallback_payload["winston_notes"] = winston_notes if 'winston_notes' in locals() else {}
         return fallback_payload

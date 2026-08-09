@@ -21,8 +21,6 @@ build/
 dist/
 *.egg-info/
 
-# Streamlit local configuration / secrets
-.streamlit/secrets.toml
 
 # IDE settings
 .vscode/

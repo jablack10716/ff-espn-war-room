@@ -1,7 +1,7 @@
 """Unit tests for Pre-Draft Keeper Manager calculation and event recording."""
 
 import pytest
-from ui.components.keeper_manager import calculate_keeper_pick_no
+from server.main import calculate_keeper_pick_no
 
 
 def test_calculate_keeper_pick_no_standard_snake():

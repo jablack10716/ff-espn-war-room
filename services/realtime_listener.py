@@ -67,11 +67,6 @@ class RealtimeListener:
                 self.is_connected = False
 
         self._thread = threading.Thread(target=_run_listener, daemon=True)
-        try:
-            from streamlit.runtime.scriptrunner import add_script_run_ctx
-            add_script_run_ctx(self._thread)
-        except Exception:
-            pass
         self._thread.start()
 
     def stop(self) -> None:

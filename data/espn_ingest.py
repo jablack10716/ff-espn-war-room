@@ -667,25 +667,65 @@ def enrich_with_multisource_data(
     if weights is None:
         weights = {"fantasypros": 0.50, "sleeper": 0.25, "espn": 0.25}
 
-    LOGGER.info("Fetching multi-source data (Sleeper API, FantasyPros ECR, Dynamic Depth Charts)")
-    
-    # 1. Fetch Sleeper ADP map
+    import config.settings as settings
+
+    LOGGER.info("Fetching multi-source data feeds (Sleeper, FantasyPros, Underdog ADP, Vegas Props, Premium Analytics)")
+
+    # 1. Sleeper ADP
     sleeper_adp_map = {}
-    try:
-        from services.sleeper_client import get_sleeper_adp_map
-        sleeper_adp_map = get_sleeper_adp_map(season_year=season_year)
-    except Exception as exc:
-        LOGGER.warning("Could not fetch Sleeper ADP: %s", exc)
+    if settings.ENABLE_SLEEPER_ADP:
+        try:
+            from services.sleeper_client import get_sleeper_adp_map
+            sleeper_adp_map = get_sleeper_adp_map(season_year=season_year)
+        except Exception as exc:
+            LOGGER.warning("Could not fetch Sleeper ADP: %s", exc)
 
-    # 2. Fetch FantasyPros ECR data
+    # 2. FantasyPros ECR
     fp_ecr_data = {}
-    try:
-        from services.fantasypros_client import fetch_fantasypros_ecr, derive_consensus_metrics
-        fp_ecr_data = fetch_fantasypros_ecr(position="OVERALL")
-    except Exception as exc:
-        LOGGER.warning("Could not fetch FantasyPros ECR: %s", exc)
+    if settings.ENABLE_FANTASYPROS_ECR:
+        try:
+            from services.fantasypros_client import fetch_fantasypros_ecr
+            fp_ecr_data = fetch_fantasypros_ecr(position="OVERALL")
+        except Exception as exc:
+            LOGGER.warning("Could not fetch FantasyPros ECR: %s", exc)
 
-    # 3. Dynamic Depth Chart resolution
+    # 3. Underdog / High-Stakes ADP
+    underdog_adp_map = {}
+    if settings.ENABLE_HIGH_STAKES_ADP:
+        try:
+            from services.underdog_client import get_underdog_adp_map
+            underdog_adp_map = get_underdog_adp_map()
+        except Exception as exc:
+            LOGGER.warning("Could not fetch Underdog ADP: %s", exc)
+
+    # 4. Vegas Sportsbook Props
+    vegas_props_map = {}
+    if settings.ENABLE_VEGAS_PROPS:
+        try:
+            from services.vegas_odds_client import get_vegas_props_map
+            vegas_props_map = get_vegas_props_map()
+        except Exception as exc:
+            LOGGER.warning("Could not fetch Vegas Props: %s", exc)
+
+    # 5. High-Stakes Projections (ETR/4for4/PFF)
+    high_stakes_map = {}
+    if settings.ENABLE_HIGH_STAKES_PROJECTIONS:
+        try:
+            from services.premium_analytics_client import get_high_stakes_projections_map
+            high_stakes_map = get_high_stakes_projections_map()
+        except Exception as exc:
+            LOGGER.warning("Could not fetch High-Stakes Projections: %s", exc)
+
+    # 6. Advanced Opportunity Metrics (Air Yards, xFP, Target Share)
+    advanced_metrics_map = {}
+    if settings.ENABLE_ADVANCED_METRICS:
+        try:
+            from services.premium_analytics_client import get_advanced_metrics_map
+            advanced_metrics_map = get_advanced_metrics_map()
+        except Exception as exc:
+            LOGGER.warning("Could not fetch Advanced Metrics: %s", exc)
+
+    # Dynamic Depth Chart resolution
     try:
         from services.depth_chart_service import resolve_dynamic_handcuffs
         rows = resolve_dynamic_handcuffs(rows)
@@ -693,19 +733,17 @@ def enrich_with_multisource_data(
         LOGGER.warning("Using fallback static handcuff resolution: %s", exc)
         rows = apply_handcuff_mappings(rows)
 
-    # 4. Enrich each row with multi-source attributes
     from services.fantasypros_client import derive_consensus_metrics
-
-    active_sources = ["espn"]
-    if sleeper_adp_map:
-        active_sources.append("sleeper")
-    if fp_ecr_data:
-        active_sources.append("fantasypros")
 
     for r in rows:
         norm_name = str(r.get("normalized_name") or "").lower()
         espn_adp = r.get("adp")
         sleeper_adp = sleeper_adp_map.get(norm_name)
+        underdog_adp = underdog_adp_map.get(norm_name)
+        vegas_pts = vegas_props_map.get(norm_name)
+        high_stakes_pts = high_stakes_map.get(norm_name)
+        adv_metrics = advanced_metrics_map.get(norm_name, {})
+
         espn_median = float(r.get("projection_median") or 0.0)
         pos = r.get("position", "RB")
 
@@ -720,21 +758,63 @@ def enrich_with_multisource_data(
 
         r["consensus_adp"] = metrics["consensus_adp"]
         r["sleeper_adp"] = sleeper_adp
+        if underdog_adp is not None:
+            r["underdog_adp"] = underdog_adp
+
+        if vegas_pts is not None:
+            r["vegas_projected_pts"] = vegas_pts
+
+        if high_stakes_pts is not None:
+            r["high_stakes_proj"] = high_stakes_pts
+
+        if adv_metrics:
+            r["air_yards_share"] = adv_metrics.get("air_yards_share", 0.0)
+            r["target_share"] = adv_metrics.get("target_share", 0.0)
+            r["xfp"] = adv_metrics.get("xfp", 0.0)
+            r["oline_tier"] = adv_metrics.get("oline_tier", 3)
+            r["proe_status"] = adv_metrics.get("proe_status", "NEUTRAL")
+
         if metrics["analyst_tier"]:
             r["tier"] = metrics["analyst_tier"]
             r["analyst_tier"] = metrics["analyst_tier"]
+
         r["projected_receptions"] = metrics["projected_receptions"]
         r["projection_floor"] = metrics["floor_p10"]
         r["projection_ceiling"] = metrics["ceiling_p90"]
         r["fp_ecr"] = metrics["fp_ecr"]
-        r["data_sources"] = active_sources
 
-        # Optional ADP update to consensus_adp for engine ranking consistency
+        # Track active data sources for this player
+        sources = ["espn"]
+        if sleeper_adp:
+            sources.append("sleeper")
+        if metrics.get("fp_ecr"):
+            sources.append("fantasypros")
+        if underdog_adp:
+            sources.append("underdog_adp")
+        if vegas_pts:
+            sources.append("vegas_props")
+        if high_stakes_pts:
+            sources.append("high_stakes")
+        if adv_metrics.get("air_yards_share") or adv_metrics.get("target_share"):
+            sources.append("advanced_metrics")
+
+        r["data_sources"] = sources
+
         if metrics["consensus_adp"] and metrics["consensus_adp"] < 900:
             r["adp"] = metrics["consensus_adp"]
 
-    LOGGER.info("Enriched %s players with active sources: %s", len(rows), active_sources)
-    return rows
+    feed_status = {
+        "espn": {"enabled": True, "status": "OK", "matched_count": len(rows), "name": "ESPN Platform Baseline"},
+        "sleeper": {"enabled": settings.ENABLE_SLEEPER_ADP, "status": "OK" if sleeper_adp_map else ("OFF" if not settings.ENABLE_SLEEPER_ADP else "FAILED"), "matched_count": len(sleeper_adp_map), "name": "Sleeper ADP"},
+        "fantasypros": {"enabled": settings.ENABLE_FANTASYPROS_ECR, "status": "OK" if fp_ecr_data else ("OFF" if not settings.ENABLE_FANTASYPROS_ECR else "FAILED"), "matched_count": len(fp_ecr_data), "name": "FantasyPros ECR"},
+        "underdog_adp": {"enabled": settings.ENABLE_HIGH_STAKES_ADP, "status": "OK" if underdog_adp_map else ("OFF" if not settings.ENABLE_HIGH_STAKES_ADP else "FAILED"), "matched_count": len(underdog_adp_map), "name": "Underdog High-Stakes ADP"},
+        "vegas_props": {"enabled": settings.ENABLE_VEGAS_PROPS, "status": "OK" if vegas_props_map else ("OFF" if not settings.ENABLE_VEGAS_PROPS else "FAILED"), "matched_count": len(vegas_props_map), "name": "Vegas Sportsbook Props"},
+        "high_stakes": {"enabled": settings.ENABLE_HIGH_STAKES_PROJECTIONS, "status": "OK" if high_stakes_map else ("OFF" if not settings.ENABLE_HIGH_STAKES_PROJECTIONS else "FAILED"), "matched_count": len(high_stakes_map), "name": "High-Stakes Projections (ETR/PFF)"},
+        "advanced_metrics": {"enabled": settings.ENABLE_ADVANCED_METRICS, "status": "OK" if advanced_metrics_map else ("OFF" if not settings.ENABLE_ADVANCED_METRICS else "FAILED"), "matched_count": len(advanced_metrics_map), "name": "AirYards & xFP Metrics"},
+    }
+
+    LOGGER.info("Enriched %s players with feed status: %s", len(rows), {k: v["status"] for k, v in feed_status.items()})
+    return rows, feed_status
 
 
 def load_fallback_seed_data(output_dir: Path) -> List[Dict[str, Any]]:
@@ -771,7 +851,9 @@ def sync_espn_league_data(
     scoring_payload: Dict[str, Any] = {}
     scoring_fmt = "HALF_PPR"
     rows: List[Dict[str, Any]] = []
+    feed_status: Dict[str, Dict[str, Any]] = {}
     used_fallback = False
+    sync_error = None
 
     try:
         league = League(
@@ -798,10 +880,11 @@ def sync_espn_league_data(
         LOGGER.warning("ESPN live API sync failed (%s). Activating offline fallback mechanism.", exc)
         rows = load_fallback_seed_data(Path("data/seed"))
         used_fallback = True
+        sync_error = str(exc)
 
     if use_multi_source and rows:
         try:
-            rows = enrich_with_multisource_data(rows, season_year=season_year)
+            rows, feed_status = enrich_with_multisource_data(rows, season_year=season_year)
         except Exception as exc:
             LOGGER.warning("Multi-source enrichment failed: %s", exc)
             rows = apply_handcuff_mappings(rows)
@@ -823,7 +906,9 @@ def sync_espn_league_data(
         "scoring_rules": scoring_payload,
         "scoring_format": scoring_fmt,
         "player_count": len(rows),
+        "feed_status": feed_status,
         "used_offline_fallback": used_fallback,
+        "error_message": sync_error,
     }
 
 

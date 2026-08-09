@@ -52,17 +52,19 @@ def test_vor_rb_higher_than_qb(sample_vor_players):
     qb_vor = calculate_vor(sample_vor_players[0], sample_vor_players, roster_req, num_teams=1)
     rb_vor = calculate_vor(sample_vor_players[2], sample_vor_players, roster_req, num_teams=1)
 
-    # Mahomes (340) vs Replacement QB (290) -> VOR = +50
-    # McCaffrey (300) vs Replacement RB (180) -> VOR = +120
+    # Hybrid Baseline = (VOLS + VORP) / 2
+    # Mahomes (340) vs Hybrid Baseline (315) -> VOR = +25
+    # McCaffrey (300) vs Hybrid Baseline (240) -> VOR = +60
     assert rb_vor > qb_vor
-    assert qb_vor == 50.0
-    assert rb_vor == 120.0
+    assert qb_vor == 25.0
+    assert rb_vor == 60.0
 
 
 def test_vor_below_replacement(sample_vor_players):
     roster_req = {"QB": 1, "RB": 1}
     qb13_vor = calculate_vor(sample_vor_players[1], sample_vor_players, roster_req, num_teams=1)
-    assert qb13_vor == 0.0  # replacement player vs baseline (itself) is 0
+    # Replacement player (290) vs Hybrid Baseline (315) is -25.0
+    assert qb13_vor == -25.0
 
 
 def test_vor_in_composite(sample_vor_players):
@@ -107,19 +109,16 @@ def test_vor_superflex_doubles_qb_baseline():
         for i in range(30)
     ]
 
-    # Standard 1QB league: replacement at index 12 (13th QB, proj = 400 - 60 = 340)
+    # Standard 1QB league: hybrid baseline of 12th (345) and 13th (340) QB = 342.5 -> VOR = 57.5
     standard_req = {"QB": 1}
     vor_standard = calculate_vor(qbs[0], qbs, standard_req, num_teams=12)
 
-    # Superflex league: replacement at index 24 (25th QB, proj = 400 - 120 = 280)
+    # Superflex league: hybrid baseline of 24th (285) and 25th (280) QB = 282.5 -> VOR = 117.5
     sf_req = {"QB": 1, "SUPERFLEX": 1}
     vor_sf = calculate_vor(qbs[0], qbs, sf_req, num_teams=12)
 
-    # QB1 projection = 400
-    # Standard baseline = 400 - 60 = 340 -> VOR = 60
-    # Superflex baseline = 400 - 120 = 280 -> VOR = 120
-    assert vor_standard == 60.0
-    assert vor_sf == 120.0
+    assert vor_standard == 57.5
+    assert vor_sf == 117.5
     assert vor_sf > vor_standard  # Superflex dramatically increases QB value
 
 
@@ -131,12 +130,12 @@ def test_vor_drafted_counts_adjustment():
     ]
     standard_req = {"QB": 1}
 
-    # No QBs drafted yet: baseline is 12th QB remaining (index 12, proj = 340, VOR = 60)
+    # No QBs drafted yet: hybrid baseline of 12th & 13th QB (342.5, VOR = 57.5)
     vor_initial = calculate_vor(qbs[0], qbs, standard_req, num_teams=12, drafted_counts={"QB": 0})
-    assert vor_initial == 60.0
+    assert vor_initial == 57.5
 
-    # 5 QBs already drafted: baseline should adjust to 12 - 5 = 7th QB remaining (index 7, proj = 365, VOR = 35)
+    # 5 QBs already drafted: hybrid baseline of 7th & 8th QB (367.5, VOR = 32.5)
     vor_with_drafted = calculate_vor(qbs[0], qbs, standard_req, num_teams=12, drafted_counts={"QB": 5})
-    assert vor_with_drafted == 35.0
+    assert vor_with_drafted == 32.5
     assert vor_with_drafted < vor_initial
 

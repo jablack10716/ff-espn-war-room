@@ -73,10 +73,10 @@ def test_calculate_fcvs_raw_log_normal() -> None:
         "is_rookie": True,
     }
 
-    fcvs_early = calculate_fcvs_raw(player_rookie, round_no=3)
-    fcvs_late = calculate_fcvs_raw(player_rookie, round_no=10)
+    fcvs_early = calculate_fcvs_raw(player_rookie, pick_no=25)
+    fcvs_late = calculate_fcvs_raw(player_rookie, pick_no=115)
 
-    # In late rounds (10+), ceiling gets log-normal expansion and ceiling weight is 90%
+    # In late picks (100+), ceiling gets log-normal expansion and ceiling weight is 90%
     assert fcvs_late > fcvs_early
 
 

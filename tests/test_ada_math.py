@@ -1,5 +1,6 @@
 """Unit tests for Ada quant engine math and composite ranking logic."""
 
+import random
 import pytest
 from engine.ada_math import (
     AdaQuantEngine,
@@ -95,6 +96,7 @@ def test_normalization_helpers():
 
 
 def test_estimate_best_at_next_turn(sample_available_players):
+    random.seed(42)
     # If 0 picks until turn, best remaining at QB is QB1 (340.0)
     best_now = estimate_best_at_next_turn("QB", sample_available_players, 0)
     assert best_now == 340.0

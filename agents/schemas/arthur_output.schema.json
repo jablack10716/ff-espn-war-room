@@ -9,8 +9,7 @@
     "reasoning_2_sentences": {
       "type": "string",
       "minLength": 20,
-      "maxLength": 500,
-      "pattern": "^.{20,500}[.!?]$"
+      "maxLength": 500
     },
     "top_3_picks": {
       "type": "array",

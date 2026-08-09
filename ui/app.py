@@ -338,7 +338,15 @@ def main() -> None:
         espn_s2 = os.getenv("ESPN_S2_COOKIE", "")
         espn_swid = os.getenv("ESPN_SWID_COOKIE", "")
 
-        use_multi_source = st.checkbox("Enable Multi-Source Blending (Sleeper + FantasyPros)", value=True)
+        use_multi_source = st.checkbox("Enable Multi-Source Blending", value=True)
+
+        with st.expander("⚡ Active Data Source Toggles & Controls", expanded=True):
+            enable_sleeper = st.checkbox("📈 Sleeper ADP", value=True)
+            enable_fp = st.checkbox("🎯 FantasyPros Consensus ECR", value=True)
+            enable_underdog = st.checkbox("⚡ Underdog High-Stakes ADP", value=True)
+            enable_vegas = st.checkbox("🎲 Vegas Sportsbook Props", value=True)
+            enable_high_stakes = st.checkbox("🔬 High-Stakes Analytics (ETR/PFF)", value=True)
+            enable_advanced = st.checkbox("📊 AirYards & xFP Opportunity Metrics", value=True)
 
         with st.expander("⚖️ Projection Blend Weights"):
             fp_weight = st.slider("FantasyPros ECR Weight", 0.0, 1.0, 0.50, 0.05)
@@ -349,8 +357,18 @@ def main() -> None:
             if not espn_league_id:
                 st.error("Please provide your ESPN League ID above or in `.env`.")
             else:
-                with st.spinner("Connecting to ESPN, Sleeper, and FantasyPros..."):
+                with st.spinner("Connecting to active multi-source data feeds..."):
                     try:
+                        from config.settings import update_data_source_settings
+                        update_data_source_settings(
+                            enable_sleeper_adp=enable_sleeper,
+                            enable_fantasypros_ecr=enable_fp,
+                            enable_high_stakes_adp=enable_underdog,
+                            enable_vegas_props=enable_vegas,
+                            enable_high_stakes_projections=enable_high_stakes,
+                            enable_advanced_metrics=enable_advanced,
+                        )
+
                         from data.espn_ingest import sync_espn_league_data, fetch_espn_roster_and_scoring
                         res = sync_espn_league_data(
                             league_id=int(espn_league_id),
@@ -387,7 +405,13 @@ def main() -> None:
                             st.success(f"Synced {res['player_count']} players across active sources!")
                         
                         st.caption(
-                            f"🟢 **Sources Active**: ESPN | Sleeper API | FantasyPros ECR\n\n"
+                            f"🟢 **Sources Active**: ESPN | "
+                            f"{'Sleeper ADP | ' if enable_sleeper else ''}"
+                            f"{'FantasyPros ECR | ' if enable_fp else ''}"
+                            f"{'Underdog ADP | ' if enable_underdog else ''}"
+                            f"{'Vegas Props | ' if enable_vegas else ''}"
+                            f"{'ETR/PFF | ' if enable_high_stakes else ''}"
+                            f"{'AirYards/xFP' if enable_advanced else ''}\n\n"
                             f"Scoring: **{st.session_state.scoring_format}** | Roster: {st.session_state.roster_requirements}"
                         )
                     except Exception as exc:

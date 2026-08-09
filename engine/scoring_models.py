@@ -117,17 +117,67 @@ def apply_stacking_multiplier(
     return 1.0
 
 
+import config.settings as settings
+
+
+def calculate_blended_projection(
+    cons_proj: float,
+    vegas_proj: Optional[float] = None,
+    high_stakes_proj: Optional[float] = None,
+    weights: Optional[Dict[str, float]] = None,
+) -> float:
+    """Calculate multi-source accuracy-weighted blended projection.
+
+    Formula (when all sources present):
+      Final = 0.40 * High_Stakes + 0.35 * Vegas + 0.25 * Consensus
+
+    Fallback rules:
+      - If high_stakes missing/disabled: 0.65 * Consensus + 0.35 * Vegas
+      - If vegas missing/disabled: 0.55 * Consensus + 0.45 * High_Stakes
+      - If both missing/disabled: 1.00 * Consensus
+    """
+    has_vegas = settings.ENABLE_VEGAS_PROPS and vegas_proj is not None and float(vegas_proj) > 0
+    has_high_stakes = settings.ENABLE_HIGH_STAKES_PROJECTIONS and high_stakes_proj is not None and float(high_stakes_proj) > 0
+
+    if not has_vegas and not has_high_stakes:
+        return round(cons_proj, 2)
+
+    if not has_high_stakes and has_vegas:
+        v_pts = float(vegas_proj)
+        return round(0.65 * cons_proj + 0.35 * v_pts, 2)
+
+    if not has_vegas and has_high_stakes:
+        h_pts = float(high_stakes_proj)
+        return round(0.55 * cons_proj + 0.45 * h_pts, 2)
+
+    v_pts = float(vegas_proj)
+    h_pts = float(high_stakes_proj)
+
+    w_cons = getattr(settings, "WEIGHT_CONSENSUS", 0.25)
+    w_vegas = getattr(settings, "WEIGHT_VEGAS", 0.35)
+    w_high = getattr(settings, "WEIGHT_HIGH_STAKES", 0.40)
+
+    blended = (w_cons * cons_proj) + (w_vegas * v_pts) + (w_high * h_pts)
+    return round(blended, 2)
+
+
 def blend_vegas_props(player: Dict[str, Any]) -> float:
     """Blend Vegas Market Over/Under prop implied points with fantasy consensus projections.
 
-    Formula: Adjusted_Projection = (0.65 * Fantasy_Consensus_Median) + (0.35 * Vegas_Prop_Implied_Points)
-    Fallbacks to pure consensus if Vegas prop data is missing or null.
+    Falls back to pure consensus if Vegas/high-stakes prop data is missing, null, or disabled.
     """
     median = float(player.get("projection_median") or 0.0)
+    if not settings.ENABLE_VEGAS_PROPS and not settings.ENABLE_HIGH_STAKES_PROJECTIONS:
+        return median
+
     vegas_pts = player.get("vegas_projected_pts")
-    if vegas_pts is not None and float(vegas_pts) > 0:
-        return round(0.65 * median + 0.35 * float(vegas_pts), 4)
-    return median
+    high_stakes_pts = player.get("high_stakes_proj")
+
+    return calculate_blended_projection(
+        cons_proj=median,
+        vegas_proj=vegas_pts,
+        high_stakes_proj=high_stakes_pts,
+    )
 
 
 def apply_scheme_and_line_scalars(player: Dict[str, Any]) -> float:
@@ -181,13 +231,19 @@ def apply_playoff_schedule_modifier(player: Dict[str, Any], round_no: int) -> fl
     return 1.0
 
 
-def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
-    """Calculate raw Floor-to-Ceiling Variance Shift score based on draft round.
+def calculate_fcvs_raw(player: Dict[str, Any], pick_no: Optional[int] = None, round_no: Optional[int] = None) -> float:
+    """Calculate raw Floor-to-Ceiling Variance Shift score based on continuous pick interpolation.
 
-    Rounds 1-5: 80% floor, 20% ceiling
-    Rounds 6-9: 50% floor, 50% ceiling
-    Rounds 10+: 10% floor, 90% ceiling (with Log-Normal right-tail expansion for late rounds)
+    Decays floor weight smoothly from 80% at Pick 1 down to 10% by Pick 160+,
+    with corresponding growth in ceiling weight.
     """
+    if pick_no is not None:
+        effective_pick = max(1, pick_no) if pick_no > 16 else max(1, (pick_no - 1) * 12 + 1)
+    elif round_no is not None:
+        effective_pick = max(1, (round_no - 1) * 12 + 1)
+    else:
+        effective_pick = 1
+
     pos = str(player.get("position", "")).upper()
     pos_var = POSITION_VARIANCE.get(pos, {"floor_mult": 0.85, "ceil_mult": 1.15})
     floor_mult = pos_var["floor_mult"]
@@ -208,12 +264,21 @@ def calculate_fcvs_raw(player: Dict[str, Any], round_no: int) -> float:
     floor_val = float(floor) if floor is not None else max(0.0, median * floor_mult)
     ceiling_val = float(ceiling) if ceiling is not None else max(median, median * ceil_mult)
 
-    # Non-Gaussian (Log-Normal) Tail Variance expansion for Round 10+
-    if round_no >= 10 and uncertainty_flag:
+    # Non-Gaussian (Log-Normal) Tail Variance expansion for late picks (Pick 100+ / ~Round 9+)
+    if effective_pick >= 100 and uncertainty_flag:
         flag_val = 1.0 if (is_rookie or player.get("uncertainty_flag") is True) else 0.5
         ceiling_val = ceiling_val * (1.0 + (0.15 * flag_val))
 
-    w_floor = max(0.10, round(0.90 - 0.08 * (round_no - 1), 4))
+    # Advanced Opportunity Metric (Air Yards / Target Share / xFP) ceiling expansion for Pick 60+ (~Round 5+)
+    if effective_pick >= 60 and settings.ENABLE_ADVANCED_METRICS:
+        air_yards_share = float(player.get("air_yards_share", 0.0))
+        target_share = float(player.get("target_share", 0.0))
+        xfp = float(player.get("xfp", 0.0))
+        if air_yards_share >= 0.25 or target_share >= 0.20 or (xfp > 0 and xfp > median):
+            ceiling_val = ceiling_val * 1.08
+
+    # Continuous linear decay from 0.80 down to 0.10 across 160 draft picks
+    w_floor = max(0.10, min(0.80, round(0.80 - 0.70 * ((effective_pick - 1) / 160.0), 4)))
     w_ceiling = round(1.0 - w_floor, 4)
 
     return round(w_floor * floor_val + w_ceiling * ceiling_val, 4)
@@ -507,11 +572,13 @@ def calculate_vor(
     starters = effective.get(pos, roster_requirements.get(pos, 1))
     total_starters_needed = int(round(num_teams * starters))
 
-    # Adjust replacement index for players already drafted at this position
+    # Adjust replacement (VORP) and last-starter (VOLS) indices for drafted players
     drafted_at_pos = 0
     if drafted_counts:
         drafted_at_pos = drafted_counts.get(pos, 0)
-    replacement_index = max(0, total_starters_needed - drafted_at_pos)  # 0-indexed
+
+    vols_index = max(0, total_starters_needed - drafted_at_pos - 1)  # 0-indexed
+    vorp_index = max(0, total_starters_needed - drafted_at_pos)      # 0-indexed
 
     pos_players = [
         p for p in available_players
@@ -526,13 +593,18 @@ def calculate_vor(
         reverse=True,
     )
 
-    if replacement_index < len(pos_sorted):
-        baseline = float(pos_sorted[replacement_index].get("projection_median") or 0.0)
-    else:
-        baseline = float(pos_sorted[-1].get("projection_median") or 0.0)
+    vols_proj = float(
+        pos_sorted[min(vols_index, len(pos_sorted) - 1)].get("projection_median") or 0.0
+    )
+    vorp_proj = float(
+        pos_sorted[min(vorp_index, len(pos_sorted) - 1)].get("projection_median") or 0.0
+    )
+
+    # Hybrid Baseline: mathematical average of VOLS (worst starter) and VORP (best unrostered)
+    hybrid_baseline = (vols_proj + vorp_proj) / 2.0
 
     player_proj = float(player.get("projection_median") or 0.0)
-    return round(player_proj - baseline, 4)
+    return round(player_proj - hybrid_baseline, 4)
 
 
 def apply_ppr_adjustment(

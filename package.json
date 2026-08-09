@@ -1,0 +1,14 @@
+{
+  "name": "ff-war-room-v2",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev:server": ".venv\\Scripts\\uvicorn server.main:app --reload --port 8000",
+    "dev:client": "npm run dev --prefix client",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "test": ".venv\\Scripts\\pytest"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

@@ -61,18 +61,35 @@ def fetch_sleeper_trending_players(type_: str = "add", lookback_hours: int = 24,
 
 
 def get_sleeper_adp_map(season_year: int = 2026) -> Dict[str, float]:
-    """Fetch sleeper player projections/adp and return dict normalized_name -> sleeper_adp."""
-    projections = fetch_sleeper_projections(season_year)
+    """Fetch Sleeper player rankings/ADP and return dict mapping normalized_name -> sleeper_adp."""
     adp_map: Dict[str, float] = {}
-    for p in projections:
-        player_data = p.get("player") or {}
-        first = str(player_data.get("first_name", "")).strip().lower()
-        last = str(player_data.get("last_name", "")).strip().lower()
-        full = f"{first} {last}".strip()
-        adp = p.get("adp") or p.get("stats", {}).get("adp_half_ppr") or p.get("stats", {}).get("adp_ppr")
-        if full and adp:
-            try:
-                adp_map[full] = float(adp)
-            except (ValueError, TypeError):
-                pass
+    players_data = fetch_sleeper_players()
+    if players_data:
+        for p in players_data.values():
+            first = str(p.get("first_name", "")).strip().lower()
+            last = str(p.get("last_name", "")).strip().lower()
+            full_name = str(p.get("full_name", "")).strip().lower() or f"{first} {last}".strip()
+            rank = p.get("search_rank")
+            if full_name and rank is not None:
+                try:
+                    val = float(rank)
+                    if 0 < val < 900:
+                        adp_map[full_name] = val
+                except (ValueError, TypeError):
+                    pass
+
+    if not adp_map:
+        projections = fetch_sleeper_projections(season_year)
+        for p in projections:
+            player_data = p.get("player") or {}
+            first = str(player_data.get("first_name", "")).strip().lower()
+            last = str(player_data.get("last_name", "")).strip().lower()
+            full = f"{first} {last}".strip()
+            adp = p.get("adp") or p.get("stats", {}).get("adp_half_ppr") or p.get("stats", {}).get("adp_ppr")
+            if full and adp:
+                try:
+                    adp_map[full] = float(adp)
+                except (ValueError, TypeError):
+                    pass
+
     return adp_map

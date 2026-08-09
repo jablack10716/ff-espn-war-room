@@ -436,6 +436,48 @@ class WarRoomOrchestrator:
         arthur_strict_payload["winston_fallback"] = True
         return arthur_strict_payload
 
+    def build_bypass_payload(
+        self, ada_rankings: List[Dict[str, Any]], margin: float
+    ) -> Dict[str, Any]:
+        """Construct deterministic payload when Ada has a clear lead (>3% margin) and AI debate is bypassed."""
+        top_3 = []
+        for i, p in enumerate(ada_rankings[:3], start=1):
+            top_3.append({
+                "rank": i,
+                "player_id": str(p.get("player_id")),
+                "player_name": str(p.get("player_name") or p.get("full_name")),
+                "position": str(p.get("position")),
+                "composite_score": float(p.get("composite_score", 0.0)),
+            })
+
+        p1_name = top_3[0]["player_name"] if top_3 else "the top available player"
+        p1_pos = top_3[0]["position"] if top_3 else "position"
+
+        marcus_notes = {}
+        winston_notes = {}
+        for p in ada_rankings[:3]:
+            pid = str(p.get("player_id"))
+            marcus_notes[pid] = "AI Debate Bypassed - Ada clear winner"
+            winston_notes[pid] = "AI Debate Bypassed - Ada clear winner"
+
+        arthur_payload = {
+            "agent": "Arthur",
+            "reasoning_2_sentences": (
+                f"Ada quant engine prioritizes {p1_name} ({p1_pos}) with a clear mathematical lead of {margin:.1f}% over candidate #2. "
+                f"AI debate was bypassed to execute the deterministic choice instantly with zero latency."
+            ),
+            "top_3_picks": top_3,
+            "fallback_used": False,
+        }
+        validate_schema(arthur_payload, "arthur_output.schema.json")
+        arthur_payload["marcus_notes"] = marcus_notes
+        arthur_payload["winston_notes"] = winston_notes
+        arthur_payload["marcus_fallback"] = False
+        arthur_payload["winston_fallback"] = False
+        arthur_payload["ai_bypassed"] = True
+        arthur_payload["margin_pct"] = round(margin, 2)
+        return arthur_payload
+
     def run_batched_evaluations(
         self,
         top_candidates: List[Dict[str, Any]],
@@ -558,6 +600,26 @@ class WarRoomOrchestrator:
             fallback_payload["marcus_fallback"] = True
             fallback_payload["winston_fallback"] = True
             return fallback_payload
+
+        # Check margin between Candidate #1 and Candidate #2
+        score1 = float(ada_rankings[0].get("composite_score", 0.0))
+        score2 = float(ada_rankings[1].get("composite_score", 0.0)) if len(ada_rankings) > 1 else 0.0
+
+        margin = ((score1 - score2) / score1 * 100.0) if score1 > 0 else 100.0
+
+        if margin > 3.0:
+            log_action("ORCHESTRATION_BYPASS", f"Ada clear lead ({margin:.1f}% margin > 3.0%). Bypassing AI debate.", {
+                "score1": score1,
+                "score2": score2,
+                "margin_pct": round(margin, 2),
+            })
+            return self.build_bypass_payload(ada_rankings, margin)
+
+        log_action("ORCHESTRATION_TIE_BREAKER", f"Neck-and-neck candidates ({margin:.1f}% margin <= 3.0%). Invoking AI debate.", {
+            "score1": score1,
+            "score2": score2,
+            "margin_pct": round(margin, 2),
+        })
 
         top_candidates = ada_rankings[:3]
         batched_timeout = max(8.0, min(12.0, timeout_seconds * 0.4))

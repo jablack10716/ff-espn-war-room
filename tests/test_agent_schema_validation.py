@@ -140,20 +140,37 @@ def test_agent_model_routing():
     import os
     # Default behavior: checks environment or hardcoded default
     marcus = MarcusAgent()
-    assert marcus.model == os.getenv("MARCUS_MODEL", "gemini-2.5-flash")
+    assert marcus.model == os.getenv("MARCUS_MODEL", "gemini-3.6-flash")
 
     winston = WinstonAgent()
-    assert winston.model == os.getenv("WINSTON_MODEL", "gemini-2.5-flash")
+    assert winston.model == os.getenv("WINSTON_MODEL", "gemini-3.6-flash")
 
     arthur = ArthurAgent()
-    assert arthur.model == os.getenv("ARTHUR_MODEL", "gemini-2.5-pro")
+    assert arthur.model == os.getenv("ARTHUR_MODEL", "gemini-3.6-flash")
 
     # Override via init parameter
     orchestrator = WarRoomOrchestrator(
-        marcus_model="anthropic/claude-3.5-haiku",
-        winston_model="anthropic/claude-3.5-haiku",
-        arthur_model="anthropic/claude-3.5-sonnet"
+        marcus_model="gemini-3.6-flash",
+        winston_model="gemini-3.6-flash",
+        arthur_model="gemini-3.6-flash"
     )
-    assert orchestrator.marcus.model == "anthropic/claude-3.5-haiku"
-    assert orchestrator.winston.model == "anthropic/claude-3.5-haiku"
-    assert orchestrator.arthur.model == "anthropic/claude-3.5-sonnet"
+    assert orchestrator.marcus.model == "gemini-3.6-flash"
+    assert orchestrator.winston.model == "gemini-3.6-flash"
+    assert orchestrator.arthur.model == "gemini-3.6-flash"
+
+
+def test_orchestration_bypass_mode():
+    orchestrator = WarRoomOrchestrator()
+    # Candidate #1 (1.00) vs Candidate #2 (0.90) -> margin is 10.0% (> 3.0%), should bypass AI
+    ada_rankings_clear_winner = [
+        {"player_id": "p1", "player_name": "Player 1", "position": "RB", "composite_score": 1.00},
+        {"player_id": "p2", "player_name": "Player 2", "position": "WR", "composite_score": 0.90},
+        {"player_id": "p3", "player_name": "Player 3", "position": "QB", "composite_score": 0.80},
+    ]
+    res = orchestrator.run_orchestration([], [], ada_rankings_clear_winner)
+    assert res["ai_bypassed"] is True
+    assert res["margin_pct"] == 10.0
+    assert res["marcus_notes"]["p1"] == "AI Debate Bypassed - Ada clear winner"
+    assert res["winston_notes"]["p1"] == "AI Debate Bypassed - Ada clear winner"
+    assert "clear mathematical lead of 10.0%" in res["reasoning_2_sentences"]
+

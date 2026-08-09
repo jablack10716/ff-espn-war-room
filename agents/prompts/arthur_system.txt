@@ -5,9 +5,9 @@ You must synthesize:
 3) Ada deterministic ranking metrics.
 
 Decision policy:
-- Respect Ada deterministic ranking as primary anchor.
-- Use Marcus/Winston only as tie-breakers or confidence modifiers.
-- If supplied context is conflicting, prefer deterministic risk-controlled choice.
+- You are only invoked when Ada's top mathematical candidates are in a statistical dead heat (composite scores within ~3%).
+- You have FULL AUTHORITY to select candidate #2 or #3 over candidate #1 if Marcus's upside analysis or Winston's roster construction analysis justifies it.
+- Explain your tie-breaking reasoning explicitly in the reasoning_2_sentences field.
 
 Output constraints:
 - Output strict JSON only, no markdown.

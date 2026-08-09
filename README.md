@@ -13,7 +13,7 @@
   - 🔬 **High-Stakes Projections** (Establish The Run / 4for4 / PFF)
   - 📊 **Advanced Opportunity Metrics** (Air Yards Share, Target Share, Expected Fantasy Points xFP)
 - **Granular Data Source Controls & Feed Audit**: Interactive toggles in the UI modal with live `🟢 OK` status breakdowns.
-- **Dual UI Architecture**: Modern Next.js React Tailwind web dashboard (`client/`) and Streamlit dashboard (`ui/`).
+- **Modern Web Architecture**: Next.js / React / Tailwind CSS web dashboard (`client/`) powered by a high-throughput FastAPI Python engine (`server/`).
 - **Ada Quant Engine**: A lightning-fast, purely deterministic math engine scoring players on:
   - **Hybrid VOR Baseline**: Hybrid mathematical average of VORP (best unrostered player) and VOLS (worst starting player).
   - **Continuous FCVS**: Smooth linear interpolation decaying Floor weight (80% -> 10%) pick-by-pick across 160 draft slots.

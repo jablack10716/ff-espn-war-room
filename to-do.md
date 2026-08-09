@@ -28,13 +28,13 @@ Use this checklist to track phase completion across all phases and enhancement s
 
 ---
 
-## 3) Phase 3: Streamlit Clone Board UI & Service Layer (`ui/app.py`)
+## 3) Phase 3: Web Dashboard UI & Service Layer (`client/` & `server/main.py`)
 
 - [x] Supabase thread-safe client singleton ([services/supabase_client.py](services/supabase_client.py)).
 - [x] Draft state management service & atomic Undo Last Pick ([services/draft_state_service.py](services/draft_state_service.py)).
 - [x] Supabase Realtime WebSocket listener ([services/realtime_listener.py](services/realtime_listener.py)).
 - [x] REST heartbeat loop poller for sequence drift repair ([services/heartbeat.py](services/heartbeat.py)).
-- [x] Streamlit UI layout and component fragments ([ui/app.py](ui/app.py)):
+- [x] Web UI layout and component fragments ([client/components/](client/components/)):
   - [x] Connectivity & health status badges ([ui/components/connectivity_status.py](ui/components/connectivity_status.py)).
   - [x] Interactive draft board grid & searchbox ([ui/components/draft_board.py](ui/components/draft_board.py)).
   - [x] Live vs Practice Mock Simulator mode.
@@ -62,7 +62,7 @@ Use this checklist to track phase completion across all phases and enhancement s
 - [x] **Item 2: Scoring Format Awareness (PPR/Half-PPR/Standard)**
   - Extracted scoring format from ESPN settings in `data/espn_ingest.py`.
   - Implemented `apply_ppr_adjustment` in `engine/scoring_models.py` and `engine/ada_math.py`.
-  - Displayed scoring format in Streamlit UI sidebar.
+  - Displayed scoring format in web UI header.
   - Implemented test suite in `tests/test_ppr_adjustment.py`.
 - [x] **Item 3: Realistic Positional Projection Variance**
   - Added `POSITION_VARIANCE` table to `data/espn_ingest.py` (QB, RB, WR, TE, K, DST specific floor/ceil multipliers).

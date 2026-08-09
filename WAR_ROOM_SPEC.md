@@ -1,8 +1,8 @@
 # The Best Damn Fantasy Football Drafting App - Root SSOT Specification
 
-Status: Execution Mode (Phase 1 in progress)
+Status: Execution Mode (Phase 6 / Next.js + FastAPI Engine Production Release)
 Owner: Product/Engineering
-Last Updated: 2026-07-28
+Last Updated: 2026-08-09
 Scope: This document is the immutable Single Source of Truth (SSOT) for architecture, data contracts, deterministic math, orchestration, and phased delivery.
 
 ## 1) Product Objective and Non-Negotiables
@@ -10,94 +10,92 @@ Scope: This document is the immutable Single Source of Truth (SSOT) for architec
 Build a real-time, high-throughput Fantasy Football draft assistant for live ESPN drafts with deterministic quant scoring and multi-agent synthesis.
 
 Non-negotiables:
-- Frontend is Streamlit.
-- Partial non-blocking updates use `@st.fragment`.
-- Manual logging uses `streamlit-searchbox` with <=2s interaction latency target.
+- Frontend is Next.js / React / Tailwind CSS (`client/`).
+- Real-time updates use WebSockets over `/ws/draft` and Zustand state management.
+- Interaction latency target <=2s.
 - Atomic `Undo Last Pick` action must be supported.
 - Database is Supabase Postgres.
-- Realtime source is Supabase Realtime WebSocket over `draft_log`.
-- HTTP heartbeat fallback must recover state when websocket stales/disconnects.
+- Backend API Engine is FastAPI Python server (`server/main.py`).
 - League rules/scoring are seeded pre-draft via Python `espn-api` ingestion.
 - Quant engine (Ada) is pure deterministic Python math (no LLM math delegation).
-- Orchestration is Fan-Out/Fan-In 2 picks before user turn.
-- Hard 5-second network timeout for agent calls with deterministic fallback.
-- Agent outputs are strict contract JSON for parse safety.
+- Hybrid VORP/VOLS baseline, Continuous FCVS interpolation, Monte Carlo Next-Turn Opportunity Cost.
+- Orchestration is Fan-Out/Fan-In multi-agent LLM debate (Marcus, Winston, Arthur).
+- Hard timeout cap with 2-attempt micro-retry resilience and deterministic fallback.
+- Agent outputs use contract JSON for parse safety.
 
 ## 2) System Architecture and Data Flow
 
 ### 2.1 High-Level Components
 
-- UI Layer: Streamlit app (`app.py`)
+- UI Layer: Next.js React Web Dashboard (`client/`)
+- API / Engine Layer: FastAPI Python Server (`server/main.py`)
 - Data Layer: Supabase Postgres + Realtime + REST
-- Ingestion Layer: ESPN bootstrap script (`espn_ingest.py`)
-- Quant Layer: Ada deterministic engine (`ada_math.py`)
-- Agent Layer: Marcus, Winston, Arthur (`war_room_agents.py`)
-- Orchestration Runtime: Google Antigravity/OpenRouter graph
+- Ingestion Layer: ESPN & Multi-Source Bootstrap Service (`data/espn_ingest.py` & `services/`)
+- Quant Layer: Ada deterministic engine (`engine/ada_math.py` & `engine/scoring_models.py`)
+- Agent Layer: Marcus, Winston, Arthur (`agents/war_room_agents.py`)
+- Orchestration Runtime: Google Antigravity / Gemini graph
 
 ### 2.2 End-to-End Sequence Mapping
 
-1. User records pick (manual search-select + submit).
-2. UI writes pick event to `draft_log` in Supabase.
-3. Realtime websocket event is emitted from `draft_log` and consumed by all active clients.
-4. UI updates local state and removes player from `available_players` view.
-5. Heartbeat loop (REST) validates monotonic pick number and repairs drift if websocket lag/miss detected.
-6. On each new pick, Ada recomputes deterministic scores:
-   - Opportunity Cost
-   - FCVS
-   - HLI
-   - PRV
-7. When `picks_until_user_turn <= 2`, orchestrator executes Fan-Out:
-   - Marcus call (upside sentence)
-   - Winston call (roster-need sentence)
-   - Ada deterministic output already available
-8. Fan-In joins Marcus + Winston + Ada into Arthur input payload.
-9. Arthur returns strict JSON with:
+1. User records pick (manual search-select + submit in React web dashboard).
+2. UI writes pick event via FastAPI endpoint (`/api/picks`) to `draft_log` in Supabase.
+3. Realtime WebSocket event (`DRAFT_UPDATED`) is broadcast over `/ws/draft` to all connected web clients.
+4. Web client updates Zustand store (`useDraftStore.ts`) and removes player from `available_players` view.
+5. On each new pick, Ada recomputes deterministic scores:
+   - Hybrid VOR Baseline (VORP + VOLS)
+   - Continuous FCVS Interpolation
+   - Monte Carlo Next-Turn Opportunity Cost (200 simulations)
+   - Handcuff Leverage Index (HLI)
+   - Positional Run Velocity (PRV)
+6. When user clicks "Trigger War Room Agent Debate" (or on automated triggers), orchestrator executes Fan-Out:
+   - Marcus call (scout upside)
+   - Winston call (roster fit & need)
+7. Fan-In joins Marcus + Winston + Ada into Arthur input payload.
+8. Arthur returns strict JSON with:
    - `reasoning_2_sentences`
    - `top_3_picks`
-10. UI renders ranked recommendations and rationale.
-11. If any network/model call exceeds 5 seconds, fallback path is activated:
-   - Skip delayed model result(s)
+9. UI renders ranked recommendations and multi-agent debate panel.
+10. If any network/model call fails or exceeds timeout, micro-retry & fallback path is activated:
    - Render Ada-only deterministic ranking with fallback rationale label.
-12. If user clicks Undo Last Pick, system executes atomic rollback transaction:
-   - Delete last draft_log event
+11. If user clicks Undo Last Pick, system executes atomic rollback transaction (`/api/undo`):
+   - Delete last `draft_log` event
    - Recompute availability and all derived metrics
-   - Broadcast correction via Realtime.
+   - Broadcast correction via WebSocket (`PICK_UNDONE`).
 
 ### 2.3 Text Diagram (Mermaid)
 
 ```mermaid
 sequenceDiagram
-    participant U as User
-    participant S as Streamlit UI
+    participant U as User (React UI)
+    participant C as Next.js Client
+    participant S as FastAPI Server
     participant DB as Supabase Postgres
-    participant RT as Supabase Realtime
     participant A as Ada Math Engine
     participant O as Orchestrator
-    participant M as Marcus
-    participant W as Winston
-    participant G as Arthur
+    participant M as Marcus (Scout)
+    participant W as Winston (Architect)
+    participant G as Arthur (GM)
 
-    U->>S: Log pick / Undo last pick
+    U->>C: Log pick / Undo last pick
+    C->>S: POST /api/picks or /api/undo
     S->>DB: Insert/Delete on draft_log (atomic)
-    DB-->>RT: Change notification
-    RT-->>S: Realtime event payload
-    S->>DB: Heartbeat REST poll (interval)
-    DB-->>S: Snapshot delta / latest pick_no
+    S-->>C: WebSocket Broadcast (DRAFT_UPDATED)
 
     S->>A: Recompute deterministic metrics
-    A-->>S: FCVS + HLI + PRV + opportunity cost
+    A-->>S: Hybrid VOR + FCVS + PRV + Monte Carlo OC
 
-    alt picks_until_user_turn <= 2
+    alt Manual/Automated Trigger
+        C->>S: POST /api/draft/deliberate
         S->>O: Trigger Fan-Out
         O->>M: Scout prompt
         O->>W: Roster prompt
-        M-->>O: JSON (1 sentence)
-        W-->>O: JSON (1 sentence)
+        M-->>O: JSON upside sentence
+        W-->>O: JSON need sentence
         O->>G: Fan-In payload (Marcus + Winston + Ada)
-        G-->>O: Strict JSON top_3_picks + 2-sentence reasoning
-        O-->>S: Render recommendations
-    else timeout > 5s or agent failure
-        O-->>S: Fallback Ada-only recommendation payload
+        G-->>O: Strict JSON top_3_picks + reasoning
+        O-->>C: Render recommendations & agent debate
+    else timeout or agent failure
+        O-->>C: Fallback Ada-only recommendation payload
     end
 ```
 
@@ -527,41 +525,35 @@ The War Room Orchestrator ([`agents/war_room_agents.py`](file:///C:/Code/FF-War-
 - **Winston (Roster Architect)** receives: Current roster composition by position, unfilled starting requirements, player Bye week, and roster Bye week overlaps.
 - **Arthur (General Manager)** receives: Marcus scout notes, Winston roster notes, and Ada's quantitative composite candidates with Vegas implied points, Underdog ADP, and xFP metrics.
 
-## 6) Streamlit and Frontend Application Architecture
+## 6) Web Client & Frontend Application Architecture (`client/`)
 
-### 6.1 Session State Keys (minimum)
+### 6.1 State Management (Zustand Store: `useDraftStore.ts`)
 
-- `draft_id`
-- `last_seen_pick_no`
-- `draft_log_cache`
-- `available_players_cache`
-- `user_roster_state`
-- `recommendations`
-- `agent_status`
-- `fallback_mode`
-- `ws_connected`
-- `heartbeat_last_ok_ts`
-- `undo_stack`
+- `draftState`: Full draft board, picks, available players, and rosters.
+- `adaRankings`: Live candidate rankings from Ada quant engine.
+- `agentAdvisories`: Multi-agent synthesis output (Marcus, Winston, Arthur).
+- `isDeliberating`: Boolean loading state for live AI agent debate.
+- `activeModal`: ESPN sync modal and feed settings modal state.
+- `feedStatus`: Live multi-source data feed health (`🟢 OK`, `⚪ OFF`, `⚠️ Failed`).
 
-### 6.2 `@st.fragment` Isolation Strategy
+### 6.2 Component Architecture
 
-- Fragment A: Draft board and searchbox input.
-- Fragment B: Recommendation panel.
-- Fragment C: Connectivity and health indicators.
+- `HeaderBar.tsx`: System header, connectivity indicators, feed status audit modal button.
+- `PickInput.tsx`: Real-time player searchbox and pick entry/undo controls.
+- `AdaRecommendations.tsx`: Quantitative rank cards with composite breakdown metrics.
+- `AgentAdvisoryPanel.tsx`: Marcus, Winston, and Arthur multi-agent debate cards.
+- `FullDraftGrid.tsx`: Interactive full draft grid board with pick status.
+- `RosterGrid.tsx`: User roster tracking panel.
+- `ESPNSyncModal.tsx`: Live ESPN credentials sync modal and data source toggles.
 
-Rules:
-- Keep expensive recompute out of top-level rerun path.
-- Fragment B rerenders on score/recommendation changes only.
-- Fragment A rerenders on `draft_log` mutations and user actions.
+### 6.3 Real-Time WebSocket Communication (`/ws/draft`)
 
-### 6.3 Background Connection Model
-
-- Dedicated background thread/task for Supabase Realtime subscription.
-- Separate heartbeat loop for REST reconciliation every 2-3 seconds.
-- Shared thread-safe queue/event buffer for UI-safe state mutation.
+- React client maintains an active WebSocket connection to FastAPI backend (`/ws/draft`).
+- Broadcast events: `DRAFT_UPDATED`, `DEBATE_COMPLETED`, `SYNC_COMPLETED`, `PICK_UNDONE`.
+- Reconnect handler re-syncs state automatically on connection recovery.
 
 Safety requirements:
-- Mutate session state only in Streamlit-safe context.
+- Mutate Zustand store in thread-safe React context.
 - Debounce duplicate events by `(draft_id, pick_no, player_id, event_type)`.
 - Ensure websocket disconnect triggers visible degraded-state banner.
 
@@ -698,13 +690,13 @@ Exit criteria:
 - Deterministic ranking reproducible from same draft state.
 - Unit tests pass for all primary math branches.
 
-### Phase 3: Streamlit Clone Board UI (`app.py`)
+### Phase 3: Service Layer & Web Client Integration (`client/` & `server/`)
 
 Checklist:
 - Build draft board, player searchbox, and recommendation panel.
 - Implement atomic Undo Last Pick control.
-- Integrate realtime listener + heartbeat reconciliation.
-- Implement fragment boundaries for low-latency partial rerender.
+- Integrate WebSocket listener + heartbeat reconciliation.
+- Implement component isolation for low-latency partial rerender.
 - Add degraded/fallback mode status chips.
 
 Exit criteria:

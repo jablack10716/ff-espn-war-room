@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useDraftStore } from "../stores/useDraftStore";
-import { Cpu, Loader2, Sparkles } from "lucide-react";
+import { Cpu, Lightbulb, Loader2, Sparkles } from "lucide-react";
 
 export const AgentAdvisoryPanel: React.FC = () => {
   const { agentAdvisories, adaRankings, triggerDebate, isDeliberating } = useDraftStore();
@@ -135,9 +135,16 @@ export const AgentAdvisoryPanel: React.FC = () => {
               </span>
             )}
           </div>
-          <p className="text-xs font-medium text-indigo-100 leading-relaxed bg-slate-950/80 p-3 rounded-lg border border-indigo-900/60">
-            {arthurReasoning || "General Manager strategy synthesis pending. Click debate to trigger."}
-          </p>
+
+          <div className="rounded-lg border border-indigo-900/60 bg-slate-950/80 p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 border-b border-indigo-900/40 pb-1.5">
+              <Lightbulb className="h-4 w-4 text-amber-400 animate-pulse" />
+              <span>Key Deciding Factors (Draft Talking Points)</span>
+            </div>
+            <p className="text-xs font-medium text-indigo-100 leading-relaxed">
+              {arthurReasoning || "General Manager strategy synthesis pending. Click debate to trigger."}
+            </p>
+          </div>
         </div>
       </div>
     </div>

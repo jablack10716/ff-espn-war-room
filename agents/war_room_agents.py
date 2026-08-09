@@ -590,6 +590,7 @@ class WarRoomOrchestrator:
         user_roster: List[Dict[str, Any]],
         ada_rankings: List[Dict[str, Any]],
         timeout_seconds: float = 25.0,
+        force_debate: bool = False,
     ) -> Dict[str, Any]:
         """Execute batched evaluations and Arthur synthesis with dynamic time budgeting."""
         import time
@@ -607,7 +608,7 @@ class WarRoomOrchestrator:
 
         margin = ((score1 - score2) / score1 * 100.0) if score1 > 0 else 100.0
 
-        if margin > 3.0:
+        if not force_debate and margin > 3.0:
             log_action("ORCHESTRATION_BYPASS", f"Ada clear lead ({margin:.1f}% margin > 3.0%). Bypassing AI debate.", {
                 "score1": score1,
                 "score2": score2,
@@ -615,11 +616,18 @@ class WarRoomOrchestrator:
             })
             return self.build_bypass_payload(ada_rankings, margin)
 
-        log_action("ORCHESTRATION_TIE_BREAKER", f"Neck-and-neck candidates ({margin:.1f}% margin <= 3.0%). Invoking AI debate.", {
-            "score1": score1,
-            "score2": score2,
-            "margin_pct": round(margin, 2),
-        })
+        if force_debate:
+            log_action("ORCHESTRATION_MANUAL_TRIGGER", f"Manual trigger requested (force_debate=True). Invoking AI debate.", {
+                "score1": score1,
+                "score2": score2,
+                "margin_pct": round(margin, 2),
+            })
+        else:
+            log_action("ORCHESTRATION_TIE_BREAKER", f"Neck-and-neck candidates ({margin:.1f}% margin <= 3.0%). Invoking AI debate.", {
+                "score1": score1,
+                "score2": score2,
+                "margin_pct": round(margin, 2),
+            })
 
         top_candidates = ada_rankings[:3]
         batched_timeout = max(8.0, min(12.0, timeout_seconds * 0.4))

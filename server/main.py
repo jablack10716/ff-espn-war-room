@@ -307,6 +307,7 @@ async def deliberate_draft(draft_id: str = "default_draft_2026"):
                 user_roster=user_roster,
                 ada_rankings=ada_rankings,
                 timeout_seconds=25.0,
+                force_debate=True,
             ),
             timeout=25.0,
         )

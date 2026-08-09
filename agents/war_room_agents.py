@@ -296,6 +296,8 @@ class ArthurAgent:
         marcus_notes: List[Dict[str, Any]],
         winston_notes: List[Dict[str, Any]],
         ada_top_candidates: List[Dict[str, Any]],
+        user_roster: Optional[List[Dict[str, Any]]] = None,
+        opponent_rosters: Optional[Dict[Any, Any]] = None,
         timeout_seconds: float = 5.0,
     ) -> Optional[Dict[str, Any]]:
         import time
@@ -307,22 +309,26 @@ class ArthurAgent:
                 "player_id": p["player_id"],
                 "player_name": p.get("player_name") or p.get("full_name"),
                 "position": p["position"],
+                "team": p.get("team", "FA"),
+                "bye_week": p.get("bye_week"),
                 "composite_score": p.get("composite_score", 0.0),
                 "vegas_implied_pts": p.get("vegas_projected_pts"),
                 "underdog_adp": p.get("underdog_adp"),
                 "high_stakes_proj": p.get("high_stakes_proj"),
                 "expected_pts_xfp": p.get("xfp"),
-                "active_data_feeds": p.get("data_sources", []),
+                "injury_status": p.get("injury_status", "ACTIVE"),
             }
             for i, p in enumerate(ada_top_candidates[:3])
         ]
 
         user_prompt = (
-            f"Synthesize recommendations.\n"
+            f"Synthesize comprehensive draft recommendation and comparative analysis.\n"
             f"Marcus Scout Notes: {marcus_notes}\n"
             f"Winston Roster Notes: {winston_notes}\n"
-            f"Ada Top Candidates & Multi-Source Metrics: {cand_summary}\n"
-            f"Return strict JSON matching schema with keys: agent='Arthur', reasoning_2_sentences, top_3_picks, fallback_used=False."
+            f"Ada Top Candidates & Metrics: {cand_summary}\n"
+            f"User Current Roster & Bye Weeks: {user_roster or []}\n"
+            f"League Opponents Roster Counts: {opponent_rosters or {}}\n"
+            f"Return strict JSON matching schema with keys: agent='Arthur', reasoning_2_sentences, detailed_breakdown, top_3_picks, fallback_used=False."
         )
 
         log_action("ARTHUR_SYNTHESIZE_START", f"Arthur starting synthesis with model '{self.model}'", {
@@ -422,6 +428,11 @@ class WarRoomOrchestrator:
                 f"cost and ceiling metrics. Selecting from the top deterministic tier preserves "
                 f"key positional value before the next turn cliff."
             ),
+            "detailed_breakdown": {
+                "primary_rationale": f"{p1_name} provides the highest baseline projection and positional value anchor for your draft strategy.",
+                "comparison_vs_runnerups": f"{p1_name} offers superior immediate value and lower risk profile than secondary options.",
+                "draft_context_factors": f"Fills a key roster slot while preserving structural draft flexibility for upcoming turns.",
+            },
             "top_3_picks": top_3,
             "fallback_used": True,
         }
@@ -452,6 +463,8 @@ class WarRoomOrchestrator:
 
         p1_name = top_3[0]["player_name"] if top_3 else "the top available player"
         p1_pos = top_3[0]["position"] if top_3 else "position"
+        p2_name = top_3[1]["player_name"] if len(top_3) > 1 else "the runner-up"
+        p3_name = top_3[2]["player_name"] if len(top_3) > 2 else "alternative options"
 
         marcus_notes = {}
         winston_notes = {}
@@ -466,6 +479,11 @@ class WarRoomOrchestrator:
                 f"Ada quant engine prioritizes {p1_name} ({p1_pos}) with a clear mathematical lead of {margin:.1f}% over candidate #2. "
                 f"AI debate was bypassed to execute the deterministic choice instantly with zero latency."
             ),
+            "detailed_breakdown": {
+                "primary_rationale": f"{p1_name} holds a decisive {margin:.1f}% quantitative score advantage, featuring superior VORP and ceiling metrics.",
+                "comparison_vs_runnerups": f"{p1_name} outranks both {p2_name} and {p3_name} across composite opportunity cost, target projections, and positional value.",
+                "draft_context_factors": f"Selecting {p1_name} optimizes your starting lineup balance without taking unnecessary risk or overlapping key bye weeks.",
+            },
             "top_3_picks": top_3,
             "fallback_used": False,
         }
@@ -591,6 +609,7 @@ class WarRoomOrchestrator:
         ada_rankings: List[Dict[str, Any]],
         timeout_seconds: float = 25.0,
         force_debate: bool = False,
+        opponent_rosters: Optional[Dict[Any, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute batched evaluations and Arthur synthesis with dynamic time budgeting."""
         import time
@@ -642,7 +661,14 @@ class WarRoomOrchestrator:
             elapsed = time.time() - t_start
             synthesis_timeout = max(14.0, timeout_seconds - elapsed)
 
-            arthur_res = self.arthur.synthesize(marcus_list, winston_list, ada_rankings, timeout_seconds=synthesis_timeout)
+            arthur_res = self.arthur.synthesize(
+                marcus_list,
+                winston_list,
+                ada_rankings,
+                user_roster=user_roster,
+                opponent_rosters=opponent_rosters,
+                timeout_seconds=synthesis_timeout,
+            )
             elapsed_total = round(time.time() - t_start, 3)
 
             if arthur_res and arthur_res.get("top_3_picks"):

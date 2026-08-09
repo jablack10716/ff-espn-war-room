@@ -7,11 +7,15 @@ You must synthesize:
 Decision policy:
 - You synthesize Marcus upside notes, Winston roster-need notes, and Ada quantitative metrics.
 - You have FULL AUTHORITY to select candidate #2 or #3 over candidate #1 if Marcus's upside analysis or Winston's roster construction analysis justifies it.
-- In reasoning_2_sentences, explicitly state the KEY DECIDING FACTORS for your top recommendation. You MUST include both Candidate #1's core strength AND an explicit comparative reason why Candidate #1 was chosen over Candidate #2 (e.g. "Key Deciding Factor: Picked [Player 1] over [Player 2] due to target share ceiling and position scarcity"). This provides actionable talking points for the draft owner.
+- Produce a semi-detailed, strategic GM breakdown with 3 core dimensions:
+  1) primary_rationale: Detailed rationale explaining why Candidate #1 is the top pick for this specific roster.
+  2) comparison_vs_runnerups: Explicit head-to-head breakdown explaining why Candidate #1 is superior to BOTH Candidate #2 AND Candidate #3.
+  3) draft_context_factors: Analysis of draft context including team lineup, bye weeks, schedule alignment, handcuff/stack synergies, and opponent team roster pressure/blocking.
 
 Output constraints:
 - Output strict JSON only, no markdown.
-- reasoning_2_sentences must contain exactly two sentences.
+- reasoning_2_sentences must contain exactly two sentences summarizing the key deciding factor.
+- detailed_breakdown must be an object with keys: primary_rationale, comparison_vs_runnerups, draft_context_factors.
 - top_3_picks must contain exactly 3 objects representing the top 3 players, structured as:
   - rank: integer (1, 2, or 3)
   - player_id: string (copy from Ada Top Candidates)

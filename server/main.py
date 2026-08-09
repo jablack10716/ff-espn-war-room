@@ -299,6 +299,16 @@ async def deliberate_draft(draft_id: str = "default_draft_2026"):
     user_roster = state_payload.get("user_roster", [])
     ada_rankings = state_payload.get("ada_rankings", [])
 
+    draft_log = state_payload.get("draft_log", [])
+    opponent_rosters: Dict[int, Dict[str, int]] = {}
+    for entry in draft_log:
+        tslot = entry.get("team_slot")
+        pos = str(entry.get("position", "")).upper()
+        if tslot and pos:
+            if tslot not in opponent_rosters:
+                opponent_rosters[tslot] = {}
+            opponent_rosters[tslot][pos] = opponent_rosters[tslot].get(pos, 0) + 1
+
     try:
         advisory = await asyncio.wait_for(
             asyncio.to_thread(
@@ -308,6 +318,7 @@ async def deliberate_draft(draft_id: str = "default_draft_2026"):
                 ada_rankings=ada_rankings,
                 timeout_seconds=25.0,
                 force_debate=True,
+                opponent_rosters=opponent_rosters,
             ),
             timeout=25.0,
         )

@@ -28,6 +28,16 @@
         }
       }
     },
-    "fallback_used": { "type": "boolean", "default": false }
+    "fallback_used": { "type": "boolean", "default": false },
+    "detailed_breakdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary_rationale", "comparison_vs_runnerups", "draft_context_factors"],
+      "properties": {
+        "primary_rationale": { "type": "string" },
+        "comparison_vs_runnerups": { "type": "string" },
+        "draft_context_factors": { "type": "string" }
+      }
+    }
   }
 }

@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useDraftStore } from "../stores/useDraftStore";
-import { Cpu, Lightbulb, Loader2, Sparkles } from "lucide-react";
+import { Cpu, Lightbulb, Loader2, ShieldCheck, Sparkles, Swords, Target } from "lucide-react";
 
 export const AgentAdvisoryPanel: React.FC = () => {
   const { agentAdvisories, adaRankings, triggerDebate, isDeliberating } = useDraftStore();
@@ -21,6 +21,11 @@ export const AgentAdvisoryPanel: React.FC = () => {
   const marcusPitch = topPick?.marcus_upside || agentAdvisories?.marcus_notes?.[topAdaPlayer?.player_id || ""] || null;
   const winstonPitch = topPick?.winston_need || agentAdvisories?.winston_notes?.[topAdaPlayer?.player_id || ""] || null;
   const arthurReasoning = agentAdvisories?.reasoning_2_sentences || topPick?.arthur_reasoning || null;
+
+  const detailedBreakdown = agentAdvisories?.detailed_breakdown || null;
+  const primaryRationale = detailedBreakdown?.primary_rationale;
+  const comparisonVsRunnerups = detailedBreakdown?.comparison_vs_runnerups;
+  const draftContextFactors = detailedBreakdown?.draft_context_factors;
 
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-indigo-900/40 bg-gradient-to-b from-indigo-950/30 via-slate-900/80 to-slate-950 p-4 backdrop-blur-xl shadow-xl">
@@ -117,8 +122,8 @@ export const AgentAdvisoryPanel: React.FC = () => {
         </div>
 
         {/* Arthur GM Terminal Card */}
-        <div className="rounded-xl border border-indigo-500/50 bg-indigo-950/40 p-4 shadow-md">
-          <div className="flex items-center justify-between mb-2">
+        <div className="rounded-xl border border-indigo-500/50 bg-indigo-950/40 p-4 shadow-md flex flex-col gap-3">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="flex h-6 w-6 items-center justify-center rounded bg-indigo-500 text-slate-950 font-black text-xs shadow-md">
                 A
@@ -136,15 +141,54 @@ export const AgentAdvisoryPanel: React.FC = () => {
             )}
           </div>
 
+          {/* Key Deciding Factors Summary Box */}
           <div className="rounded-lg border border-indigo-900/60 bg-slate-950/80 p-3 space-y-2">
             <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 border-b border-indigo-900/40 pb-1.5">
               <Lightbulb className="h-4 w-4 text-amber-400 animate-pulse" />
-              <span>Key Deciding Factors (Draft Talking Points)</span>
+              <span>Key Deciding Factors (Executive Summary)</span>
             </div>
             <p className="text-xs font-medium text-indigo-100 leading-relaxed">
               {arthurReasoning || "General Manager strategy synthesis pending. Click debate to trigger."}
             </p>
           </div>
+
+          {/* Semi-Detailed Breakdown Grid */}
+          {detailedBreakdown && (
+            <div className="flex flex-col gap-2 pt-1 border-t border-indigo-900/40">
+              {/* Primary Pick Rationale */}
+              {primaryRationale && (
+                <div className="rounded-lg border border-emerald-900/40 bg-emerald-950/20 p-2.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400 mb-1">
+                    <Target className="h-3.5 w-3.5" />
+                    <span>🎯 Selection Rationale</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">{primaryRationale}</p>
+                </div>
+              )}
+
+              {/* Head to Head Comparison */}
+              {comparisonVsRunnerups && (
+                <div className="rounded-lg border border-violet-900/40 bg-violet-950/20 p-2.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-violet-400 mb-1">
+                    <Swords className="h-3.5 w-3.5" />
+                    <span>⚔️ Head-to-Head Comparison (#1 vs #2 & #3)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">{comparisonVsRunnerups}</p>
+                </div>
+              )}
+
+              {/* Draft Context Factors */}
+              {draftContextFactors && (
+                <div className="rounded-lg border border-teal-900/40 bg-teal-950/20 p-2.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-teal-400 mb-1">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    <span>🛡️ Roster, Schedule & Opponent Context</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">{draftContextFactors}</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -20,7 +20,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger("server.main")
 
-app = FastAPI(title="FF War Room FastAPI Engine", version="2.0.0")
+app = FastAPI(title="The Best Damn Fantasy Football Drafting App Engine", version="2.0.0")
 
 # Enable CORS for Next.js dev server
 app.add_middleware(

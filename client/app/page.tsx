@@ -49,8 +49,8 @@ export default function WarRoomDashboard() {
             </div>
 
             {activeTab === "war-room" && (
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
-                Live drafting console active
+              <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
+                The Best Damn Fantasy Football Drafting App
               </span>
             )}
             {activeTab === "draft-grid" && (

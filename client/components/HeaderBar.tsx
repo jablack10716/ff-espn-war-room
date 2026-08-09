@@ -45,10 +45,10 @@ export const HeaderBar: React.FC = () => {
                 <Sparkles className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h1 className="text-lg font-extrabold tracking-tight text-white flex items-center gap-2">
-                  WAR ROOM <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400 border border-emerald-500/20">V2 ADA ENGINE</span>
+                <h1 className="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-2">
+                  THE BEST DAMN FANTASY FOOTBALL DRAFTING APP <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-bold text-emerald-400 border border-emerald-500/20">V2 ADA ENGINE</span>
                 </h1>
-                <p className="text-xs text-slate-400">High-Frequency Quant Draft Terminal</p>
+                <p className="text-xs font-semibold text-emerald-400">The Best Damn Fantasy Football Drafting App</p>
               </div>
             </div>
 

@@ -339,6 +339,16 @@ async def sync_espn(req: SyncESPNRequest):
     if not league_id:
         raise HTTPException(status_code=400, detail="ESPN League ID is required.")
 
+    from config.settings import update_data_source_settings
+    active_sources = update_data_source_settings(
+        enable_sleeper_adp=req.enable_sleeper_adp,
+        enable_fantasypros_ecr=req.enable_fantasypros_ecr,
+        enable_high_stakes_adp=req.enable_underdog_adp,
+        enable_vegas_props=req.enable_vegas_props,
+        enable_high_stakes_projections=req.enable_high_stakes_projections,
+        enable_advanced_metrics=req.enable_advanced_metrics,
+    )
+
     try:
         from data.espn_ingest import sync_espn_league_data, fetch_espn_roster_and_scoring
         res = sync_espn_league_data(
@@ -391,6 +401,7 @@ async def sync_espn(req: SyncESPNRequest):
             "teams": _espn_teams,
             "scoring_format": _scoring_format,
             "roster_requirements": _roster_requirements,
+            "feed_status": res.get("feed_status", {}),
             "state": new_state,
         }
     except Exception as exc:

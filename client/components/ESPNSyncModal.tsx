@@ -24,6 +24,7 @@ export const ESPNSyncModal: React.FC<ESPNSyncModalProps> = ({ isOpen, onClose })
     scoringFormat,
     isSyncing,
     syncMessage,
+    feedStatus,
     syncESPN,
     updateConfig,
     fetchConfig,
@@ -40,6 +41,12 @@ export const ESPNSyncModal: React.FC<ESPNSyncModalProps> = ({ isOpen, onClose })
   const [s2Input, setS2Input] = useState(espnS2);
   const [swidInput, setSwidInput] = useState(espnSwid);
   const [multiSourceInput, setMultiSourceInput] = useState(useMultiSource);
+  const [enableSleeper, setEnableSleeper] = useState(true);
+  const [enableFantasyPros, setEnableFantasyPros] = useState(true);
+  const [enableUnderdog, setEnableUnderdog] = useState(true);
+  const [enableVegas, setEnableVegas] = useState(true);
+  const [enableHighStakes, setEnableHighStakes] = useState(true);
+  const [enableAdvanced, setEnableAdvanced] = useState(true);
 
   // Keeper Selector state
   const [keeperPlayerId, setKeeperPlayerId] = useState("");
@@ -197,19 +204,55 @@ export const ESPNSyncModal: React.FC<ESPNSyncModalProps> = ({ isOpen, onClose })
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="multiSource"
-                  checked={multiSourceInput}
-                  onChange={(e) => setMultiSourceInput(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500"
-                />
-                <label htmlFor="multiSource" className="text-[11px] font-semibold text-slate-300">
-                  Enable Multi-Source Blending
-                </label>
+            {/* Multi-Source Data Feeds & Source Toggles Panel */}
+            <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase text-slate-300 tracking-wider">⚡ Data Feeds & Source Controls</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="multiSource"
+                    checked={multiSourceInput}
+                    onChange={(e) => setMultiSourceInput(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500"
+                  />
+                  <label htmlFor="multiSource" className="text-[11px] font-bold text-emerald-400">
+                    Master Multi-Source Blending
+                  </label>
+                </div>
               </div>
+
+              {multiSourceInput && (
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80 text-[10px]">
+                  <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white">
+                    <input type="checkbox" checked={enableSleeper} onChange={(e) => setEnableSleeper(e.target.checked)} className="rounded border-slate-700 text-emerald-500" />
+                    <span>📈 Sleeper ADP</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white">
+                    <input type="checkbox" checked={enableFantasyPros} onChange={(e) => setEnableFantasyPros(e.target.checked)} className="rounded border-slate-700 text-emerald-500" />
+                    <span>🎯 FantasyPros ECR</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white">
+                    <input type="checkbox" checked={enableUnderdog} onChange={(e) => setEnableUnderdog(e.target.checked)} className="rounded border-slate-700 text-emerald-500" />
+                    <span>⚡ Underdog High-Stakes ADP</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white">
+                    <input type="checkbox" checked={enableVegas} onChange={(e) => setEnableVegas(e.target.checked)} className="rounded border-slate-700 text-emerald-500" />
+                    <span>🎲 Vegas Sportsbook Props</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white">
+                    <input type="checkbox" checked={enableHighStakes} onChange={(e) => setEnableHighStakes(e.target.checked)} className="rounded border-slate-700 text-emerald-500" />
+                    <span>🔬 High-Stakes (ETR/PFF)</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 hover:text-white">
+                    <input type="checkbox" checked={enableAdvanced} onChange={(e) => setEnableAdvanced(e.target.checked)} className="rounded border-slate-700 text-emerald-500" />
+                    <span>📊 AirYards & xFP Metrics</span>
+                  </label>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -232,6 +275,34 @@ export const ESPNSyncModal: React.FC<ESPNSyncModalProps> = ({ isOpen, onClose })
               <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? "animate-spin" : ""}`} />
               {isSyncing ? "Syncing ESPN & Multi-Source Data..." : "🔄 Sync ESPN League Data & Players"}
             </button>
+
+            {/* Live Data Feeds Audit Status Results */}
+            {feedStatus && (
+              <div className="mt-2 flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase text-emerald-400 tracking-wider">📊 Data Feed Sync Audit Breakdown</span>
+                  <span className="text-[10px] text-slate-400 font-bold">Live Status</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-800/80">
+                  {Object.entries(feedStatus).map(([key, info]) => {
+                    const isOk = info.status === "OK";
+                    const isOff = info.status === "OFF";
+                    return (
+                      <div key={key} className="flex items-center justify-between rounded-lg bg-slate-900/90 px-2.5 py-1.5 border border-slate-800/80">
+                        <span className="text-slate-300 font-semibold text-[11px] truncate max-w-[110px]">{info.name || key}</span>
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${
+                          isOk ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40" :
+                          isOff ? "bg-slate-800 text-slate-400 border-slate-700" :
+                          "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                        }`}>
+                          {isOk ? `🟢 OK (${info.matched_count})` : isOff ? "⚪ OFF" : "⚠️ Failed"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </form>
         </div>
 

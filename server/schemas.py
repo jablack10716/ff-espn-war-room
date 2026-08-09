@@ -30,6 +30,12 @@ class SyncESPNRequest(BaseModel):
     espn_s2: Optional[str] = None
     swid: Optional[str] = None
     use_multi_source: bool = True
+    enable_sleeper_adp: bool = True
+    enable_fantasypros_ecr: bool = True
+    enable_underdog_adp: bool = True
+    enable_vegas_props: bool = True
+    enable_high_stakes_projections: bool = True
+    enable_advanced_metrics: bool = True
     draft_id: Optional[str] = "default_draft_2026"
 
 

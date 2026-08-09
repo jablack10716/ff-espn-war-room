@@ -239,6 +239,22 @@ Operational guidance:
   - pull latest `draft_log` rows by `draft_id`
   - recompute available set and local cache.
 
+### 3.4 7-Source Blended Data Pipeline & Feed Control Specification
+
+The platform ingests, normalizes, and blends seven complementary market consensus and sharp quantitative data feeds:
+
+1. 🏈 **ESPN Platform Baseline** ([`espn_ingest.py`](file:///C:/Code/FF-War-Room/data/espn_ingest.py)): Direct league settings, team rosters, position eligibility, and baseline projection medians.
+2. 📈 **Sleeper ADP API** ([`sleeper_client.py`](file:///C:/Code/FF-War-Room/services/sleeper_client.py)): Live Sleeper public player database rankings (`search_rank` across 12,000+ players).
+3. 🎯 **FantasyPros Consensus ECR** ([`fantasypros_client.py`](file:///C:/Code/FF-War-Room/services/fantasypros_client.py)): Expert Consensus Rankings, analyst tier breaks, and standard deviation spread.
+4. ⚡ **Underdog High-Stakes ADP** ([`underdog_client.py`](file:///C:/Code/FF-War-Room/services/underdog_client.py)): Real-money best-ball draft ADP reflecting sharp high-stakes market sentiment.
+5. 🎲 **Vegas Sportsbook Props** ([`vegas_odds_client.py`](file:///C:/Code/FF-War-Room/services/vegas_odds_client.py)): Implied fantasy points derived from season-long Passing, Rushing, and Receiving Over/Under yardage and touchdown prop lines.
+6. 🔬 **High-Stakes Analytical Projections** ([`premium_analytics_client.py`](file:///C:/Code/FF-War-Room/services/premium_analytics_client.py)): Sharp projection baselines (ETR, 4for4, PFF).
+7. 📊 **Advanced Opportunity Metrics** ([`premium_analytics_client.py`](file:///C:/Code/FF-War-Room/services/premium_analytics_client.py)): Air Yards Share, Target Share, Expected Fantasy Points (xFP), Offensive Line Tier ratings, and Pass Rate Over Expected (PROE).
+
+#### Data Source Toggles & Live Feed Audit
+- **Interactive Toggles**: Users can toggle any source feed on or off in the ESPN Settings Modal ([`ESPNSyncModal.tsx`](file:///C:/Code/FF-War-Room/client/components/ESPNSyncModal.tsx) and [`ui/app.py`](file:///C:/Code/FF-War-Room/ui/app.py)).
+- **Live Feed Audit Breakdown**: The sync payload returns a structured `feed_status` map rendering live status badges (`🟢 OK`, `⚪ OFF`, `⚠️ Failed`) with matched player counts directly in the UI modal.
+
 ## 4) Deterministic Quant Engine (Ada) Logic
 
 ### 4.1 Inputs
@@ -248,6 +264,7 @@ Operational guidance:
 - Roster composition by team and by user.
 - Tier boundaries by position.
 - Recent draft window (last 10 picks).
+- Blended projections from active 7-source multi-source feeds.
 
 ### 4.2 Opportunity Cost (OC)
 
@@ -503,7 +520,14 @@ Arthur JSON Schema:
 Note:
 - If `fallback_used` is retained, include it in `required` and all consumers; otherwise remove it from schema and payload contract. Current recommendation: include it for observability.
 
-## 6) Streamlit State Management and Runtime Rules
+### 5.5 Multi-Source Metric Context Injection into Agent Prompts
+
+The War Room Orchestrator ([`agents/war_room_agents.py`](file:///C:/Code/FF-War-Room/agents/war_room_agents.py)) dynamically injects multi-source metrics into each agent prompt during live deliberations:
+- **Marcus (Chief Scout)** receives: Active Feeds list, Real-Money Underdog ADP, Vegas Sportsbook Implied Points, High-Stakes Projections (ETR/PFF), Air Yards Share, Target Share, and Expected Fantasy Points (xFP).
+- **Winston (Roster Architect)** receives: Current roster composition by position, unfilled starting requirements, player Bye week, and roster Bye week overlaps.
+- **Arthur (General Manager)** receives: Marcus scout notes, Winston roster notes, and Ada's quantitative composite candidates with Vegas implied points, Underdog ADP, and xFP metrics.
+
+## 6) Streamlit and Frontend Application Architecture
 
 ### 6.1 Session State Keys (minimum)
 

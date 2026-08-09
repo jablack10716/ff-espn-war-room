@@ -10,8 +10,7 @@
     "upside_sentence": {
       "type": "string",
       "minLength": 10,
-      "maxLength": 280,
-      "pattern": "^.{10,280}[.!?]$"
+      "maxLength": 280
     }
   }
 }

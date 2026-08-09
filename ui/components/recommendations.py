@@ -99,8 +99,23 @@ def render_recommendations(
 
             with col_details:
                 st.markdown(f"**{name}** ({pos} - {team})")
-                bye_str = f"Bye: {bye}" if bye else "Bye: -"
                 st.caption(f"Tier: {tier} | ADP: {adp} | {bye_str} | Median Proj: {item.get('projection_median')} pts")
+
+                sources = item.get("data_sources") or ["espn"]
+                source_labels = {
+                    "espn": "ESPN",
+                    "sleeper": "Sleeper",
+                    "fantasypros": "FantasyPros",
+                    "underdog": "Underdog ADP",
+                    "underdog_adp": "Underdog ADP",
+                    "vegas": "Vegas Props",
+                    "vegas_props": "Vegas Props",
+                    "high_stakes": "ETR/PFF",
+                    "advanced": "AirYards/xFP",
+                    "advanced_metrics": "AirYards/xFP",
+                }
+                tags = " | ".join([f"`[{source_labels.get(s, s)}]`" for s in sources])
+                st.caption(f"🟢 **Blended Feeds**: {tags}")
 
                 # Injury badge
                 if injury in ("OUT", "INJURY_RESERVE", "IR", "SUSPENSION"):

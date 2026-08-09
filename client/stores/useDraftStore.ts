@@ -30,6 +30,7 @@ interface DraftStoreState {
   scoringFormat: string;
   isSyncing: boolean;
   syncMessage: string | null;
+  feedStatus: Record<string, { enabled: boolean; status: string; matched_count: number; name: string }> | null;
   is3rr: boolean;
   draftStarted: boolean;
   isDeliberating: boolean;
@@ -39,7 +40,19 @@ interface DraftStoreState {
   fetchState: () => Promise<void>;
   fetchConfig: () => Promise<void>;
   updateConfig: (userTeamSlot?: number, numTeams?: number, is3rr?: boolean) => Promise<void>;
-  syncESPN: (params: { league_id?: number; season_year?: number; espn_s2?: string; swid?: string; use_multi_source?: boolean }) => Promise<void>;
+  syncESPN: (params: {
+    league_id?: number;
+    season_year?: number;
+    espn_s2?: string;
+    swid?: string;
+    use_multi_source?: boolean;
+    enable_sleeper_adp?: boolean;
+    enable_fantasypros_ecr?: boolean;
+    enable_underdog_adp?: boolean;
+    enable_vegas_props?: boolean;
+    enable_high_stakes_projections?: boolean;
+    enable_advanced_metrics?: boolean;
+  }) => Promise<void>;
   recordPick: (playerId: string, isUserPick?: boolean, pickNo?: number, teamSlot?: number) => Promise<void>;
   undoPick: () => Promise<void>;
   deletePick: (pickNo: number) => Promise<void>;
@@ -171,6 +184,12 @@ export const useDraftStore = create<DraftStoreState>((set, get) => ({
           espn_s2: params.espn_s2,
           swid: params.swid,
           use_multi_source: params.use_multi_source ?? true,
+          enable_sleeper_adp: params.enable_sleeper_adp ?? true,
+          enable_fantasypros_ecr: params.enable_fantasypros_ecr ?? true,
+          enable_underdog_adp: params.enable_underdog_adp ?? true,
+          enable_vegas_props: params.enable_vegas_props ?? true,
+          enable_high_stakes_projections: params.enable_high_stakes_projections ?? true,
+          enable_advanced_metrics: params.enable_advanced_metrics ?? true,
           draft_id: get().draftId,
         }),
       });
@@ -185,6 +204,7 @@ export const useDraftStore = create<DraftStoreState>((set, get) => ({
         syncMessage: data.message || "ESPN Sync completed successfully!",
         espnTeams: data.teams || [],
         scoringFormat: data.scoring_format || "HALF_PPR",
+        feedStatus: data.feed_status || null,
       });
 
       if (data.state) {

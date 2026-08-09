@@ -17,7 +17,7 @@ Use this checklist to track phase completion across all phases and enhancement s
 
 ## 2) Phase 2: Python Quant Engine (`ada_math.py`)
 
-- [x] Standalone planning checklist created and approved ([phase-2-checklist.md](phase-2-checklist.md)).
+- [x] Planning & architecture specification completed ([WAR_ROOM_SPEC.md](WAR_ROOM_SPEC.md)).
 - [x] Opportunity Cost (OC) formula & ADP next-turn simulation implemented.
 - [x] Floor-to-Ceiling Variance Shift (FCVS) piecewise round weighting implemented.
 - [x] Handcuff Leverage Index (HLI) protection multipliers implemented.
@@ -30,7 +30,6 @@ Use this checklist to track phase completion across all phases and enhancement s
 
 ## 3) Phase 3: Streamlit Clone Board UI & Service Layer (`ui/app.py`)
 
-- [x] Standalone planning checklist created and approved ([phase-3-checklist.md](phase-3-checklist.md)).
 - [x] Supabase thread-safe client singleton ([services/supabase_client.py](services/supabase_client.py)).
 - [x] Draft state management service & atomic Undo Last Pick ([services/draft_state_service.py](services/draft_state_service.py)).
 - [x] Supabase Realtime WebSocket listener ([services/realtime_listener.py](services/realtime_listener.py)).
@@ -46,7 +45,6 @@ Use this checklist to track phase completion across all phases and enhancement s
 
 ## 4) Phase 4: Agent Orchestration & Fallbacks (`war_room_agents.py`)
 
-- [x] Standalone planning checklist created and approved ([phase-4-checklist.md](phase-4-checklist.md)).
 - [x] MarcusAgent (Chief Scout), WinstonAgent (Roster Architect), ArthurAgent (GM) implemented.
 - [x] WarRoomOrchestrator Fan-Out / Fan-In graph implemented.
 - [x] JSON Schema validation enforced per agent schema.
@@ -125,3 +123,46 @@ Use this checklist to track phase completion across all phases and enhancement s
   - In `engine/ada_math.py`, dynamically redistributed `w_hli` 50/50 into `w_oc` and `w_vor` for non-RB candidate positions.
   - Added unit test in `tests/test_hli_logic.py`.
 - [x] **Final Verification**: All 35 unit & integration tests passing (`python -m pytest`).
+
+---
+
+## 9) Sprint 5: Next.js Stack Migration & FastAPI Engine Integration
+
+- [x] **Item 14: React Next.js Web Dashboard (`client/`)**
+  - Built modern dark-mode UI with Zustand store management ([`client/stores/useDraftStore.ts`](client/stores/useDraftStore.ts)).
+  - Built interactive modal components, recommendations, and draft board ([`client/components/`](client/components)).
+- [x] **Item 15: FastAPI Server & WebSocket Manager (`server/main.py`)**
+  - Integrated real-time WebSocket state broadcasting and REST API endpoints.
+
+---
+
+## 10) Sprint 6: 7-Source Blended Ingestion & Live Audit Breakdown
+
+- [x] **Item 16: Multi-Source Data Ingestion Services**
+  - Built clients for Sleeper ADP ([`services/sleeper_client.py`](services/sleeper_client.py)), FantasyPros ECR ([`services/fantasypros_client.py`](services/fantasypros_client.py)), Underdog High-Stakes ADP ([`services/underdog_client.py`](services/underdog_client.py)), Vegas Props ([`services/vegas_odds_client.py`](services/vegas_odds_client.py)), and Premium Analytics ([`services/premium_analytics_client.py`](services/premium_analytics_client.py)).
+- [x] **Item 17: Granular Data Source Toggles & Live Feed Audit Breakdown**
+  - Added checkboxes for individual feeds in UI modal & sidebar.
+  - Implemented live `feed_status` audit breakdown panel (`🟢 OK`, `⚪ OFF`, `⚠️ Failed`).
+- [x] **Item 18: Multi-Agent Debate Data Integration**
+  - Injected Vegas props, Underdog ADP, Air Yards, and xFP metrics directly into Marcus, Winston, and Arthur's AI agent evaluation prompts ([`agents/war_room_agents.py`](agents/war_room_agents.py)).
+- [x] **Verification**: All 57 unit & integration tests passing (`python -m pytest`).
+
+---
+
+## 11) Sprint 7: Agent Resilience & Quant Math Engine Overhaul
+
+- [x] **Phase 1: Agent Resilience & Schema Relaxation**
+  - Relaxed strict `pattern` regex constraints in `marcus_output.schema.json`, `winston_output.schema.json`, and `arthur_output.schema.json`.
+  - Implemented 2-attempt micro-retry loop in `agents/war_room_agents.py` (`run_batched_evaluations` and `ArthurAgent.synthesize`) if LLM API call fails in `< 2.0s`.
+  - Fixed module-level `import time` in `agents/war_room_agents.py`.
+- [x] **Phase 2: Algorithmic Continuity for Variance Shifting (FCVS)**
+  - Refactored `calculate_fcvs_raw` in `engine/scoring_models.py` to use continuous linear interpolation based on `pick_no` rather than piecewise round steps.
+  - Smoothly decays floor weight from 0.80 at Pick 1 to 0.10 by Pick 160+, scaling ceiling weight dynamically as `1.0 - w_floor`.
+- [x] **Phase 3: Hybrid Baseline Integration (VORP & VOLS)**
+  - Updated `calculate_vor` in `engine/scoring_models.py` to compute Value Over Last Starter (VOLS) and Value Over Replacement Player (VORP).
+  - Derived `hybrid_baseline = (vols_proj + vorp_proj) / 2.0` to increase demand for elite starters.
+- [x] **Phase 4: Probabilistic Next-Turn Simulation (Monte Carlo OC)**
+  - Refactored `estimate_best_at_next_turn` in `engine/ada_math.py` with a 200-iteration Monte Carlo simulation.
+  - Blended multi-source ADP (60% Underdog + 40% Sleeper) with Gaussian noise ($\sigma=10\%$) for draft room variance.
+  - State-seeded determinism (`random.Random(seed_val)`) guarantees reproducible rankings.
+- [x] **Final Verification**: All 65 unit & integration tests passing (`python -m pytest`).

@@ -4,7 +4,17 @@
   "duplicate_player_ids": 0,
   "missing_full_name": 0,
   "invalid_position": 0,
-  "captured_at_utc": "2026-08-04T20:25:55.571757+00:00",
+  "captured_at_utc": "2026-08-09T16:32:46.577372+00:00",
   "league_id": 192204,
-  "season_year": 2026
+  "season_year": 2026,
+  "teams_count": 12,
+  "roster_requirements": {
+    "QB": 1,
+    "RB": 2,
+    "WR": 2,
+    "TE": 1,
+    "FLEX": 1,
+    "SUPERFLEX": 1,
+    "DST": 1
+  }
 }

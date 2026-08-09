@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -171,10 +172,22 @@ class MarcusAgent:
         median = player.get("projection_median")
 
         injury = player.get("injury_status", "ACTIVE")
+        underdog_adp = player.get("underdog_adp")
+        vegas_pts = player.get("vegas_projected_pts")
+        high_stakes_proj = player.get("high_stakes_proj")
+        air_yards = player.get("air_yards_share")
+        target_share = player.get("target_share")
+        xfp = player.get("xfp")
+        sources = player.get("data_sources", [])
 
         user_prompt = (
             f"Evaluate upside talent for candidate: {pname} (ID: {pid}, Pos: {pos}, Team: {team}, "
-            f"Tier: {tier}, ADP: {adp}, Projection Median: {median}, Injury Status: {injury}).\n"
+            f"Tier: {tier}, Consensus ADP: {adp}, Projection Median: {median}, Injury Status: {injury}).\n"
+            f"Multi-Source Data Feeds: Active Feeds: {sources}.\n"
+            f"Real-Money Underdog ADP: {underdog_adp or adp}.\n"
+            f"Vegas Sportsbook Implied Points: {vegas_pts if vegas_pts is not None else 'N/A'}.\n"
+            f"High-Stakes (ETR/PFF) Projection: {high_stakes_proj if high_stakes_proj is not None else 'N/A'}.\n"
+            f"Opportunity Metrics: Air Yards Share: {air_yards or 0.0}, Target Share: {target_share or 0.0}, Expected Fantasy Points (xFP): {xfp or 0.0}.\n"
             f"Return strict JSON matching schema with keys: agent='Marcus', player_id='{pid}', upside_sentence."
         )
 
@@ -295,6 +308,11 @@ class ArthurAgent:
                 "player_name": p.get("player_name") or p.get("full_name"),
                 "position": p["position"],
                 "composite_score": p.get("composite_score", 0.0),
+                "vegas_implied_pts": p.get("vegas_projected_pts"),
+                "underdog_adp": p.get("underdog_adp"),
+                "high_stakes_proj": p.get("high_stakes_proj"),
+                "expected_pts_xfp": p.get("xfp"),
+                "active_data_feeds": p.get("data_sources", []),
             }
             for i, p in enumerate(ada_top_candidates[:3])
         ]
@@ -303,7 +321,7 @@ class ArthurAgent:
             f"Synthesize recommendations.\n"
             f"Marcus Scout Notes: {marcus_notes}\n"
             f"Winston Roster Notes: {winston_notes}\n"
-            f"Ada Top Candidates: {cand_summary}\n"
+            f"Ada Top Candidates & Multi-Source Metrics: {cand_summary}\n"
             f"Return strict JSON matching schema with keys: agent='Arthur', reasoning_2_sentences, top_3_picks, fallback_used=False."
         )
 
@@ -313,41 +331,56 @@ class ArthurAgent:
             "top_candidates_count": len(cand_summary),
         })
 
-        raw_response = call_llm_api(
-            self.system_prompt, user_prompt, model=self.model, timeout_seconds=timeout_seconds
-        )
-        elapsed = round(time.time() - t0, 3)
+        max_attempts = 2
+        for attempt in range(1, max_attempts + 1):
+            raw_response = call_llm_api(
+                self.system_prompt, user_prompt, model=self.model, timeout_seconds=timeout_seconds
+            )
+            elapsed = round(time.time() - t0, 3)
 
-        if not raw_response:
-            log_action("ARTHUR_SYNTHESIZE_FAILED", f"Arthur API call returned None (timeout or error after {elapsed}s)", {
-                "model": self.model,
-                "elapsed_seconds": elapsed,
-                "timeout_allocated": timeout_seconds,
-            })
-            return None
-
-        try:
-            data = json.loads(raw_response)
-            data["fallback_used"] = False
-            is_valid = validate_schema(data, "arthur_output.schema.json")
-            if is_valid:
-                log_action("ARTHUR_SYNTHESIZE_SUCCESS", f"Arthur synthesis succeeded in {elapsed}s", {
+            if not raw_response:
+                log_action("ARTHUR_SYNTHESIZE_FAILED", f"Arthur API call returned None (timeout or error after {elapsed}s)", {
                     "model": self.model,
                     "elapsed_seconds": elapsed,
-                    "reasoning": data.get("reasoning_2_sentences"),
+                    "timeout_allocated": timeout_seconds,
+                    "attempt": attempt,
                 })
-                return data
-            else:
-                log_action("ARTHUR_SCHEMA_INVALID", f"Arthur response failed JSON schema validation in {elapsed}s", {
+                if attempt < max_attempts and (time.time() - t0) < 2.0:
+                    LOGGER.info("Arthur attempt %d failed in <2s (elapsed: %.2fs); triggering micro-retry", attempt, elapsed)
+                    continue
+                return None
+
+            try:
+                data = json.loads(raw_response)
+                data["fallback_used"] = False
+                is_valid = validate_schema(data, "arthur_output.schema.json")
+                if is_valid:
+                    log_action("ARTHUR_SYNTHESIZE_SUCCESS", f"Arthur synthesis succeeded in {elapsed}s", {
+                        "model": self.model,
+                        "elapsed_seconds": elapsed,
+                        "reasoning": data.get("reasoning_2_sentences"),
+                        "attempt": attempt,
+                    })
+                    return data
+                else:
+                    log_action("ARTHUR_SCHEMA_INVALID", f"Arthur response failed JSON schema validation in {elapsed}s", {
+                        "model": self.model,
+                        "raw_response_snippet": raw_response[:300],
+                        "attempt": attempt,
+                    })
+            except Exception as exc:
+                log_action("ARTHUR_PARSE_ERROR", f"Arthur JSON parsing failed in {elapsed}s: {exc}", {
                     "model": self.model,
+                    "error": str(exc),
                     "raw_response_snippet": raw_response[:300],
+                    "attempt": attempt,
                 })
-        except Exception as exc:
-            log_action("ARTHUR_PARSE_ERROR", f"Arthur JSON parsing failed in {elapsed}s: {exc}", {
-                "model": self.model,
-                "error": str(exc),
-                "raw_response_snippet": raw_response[:300],
-            })
+
+            if attempt < max_attempts and (time.time() - t0) < 2.0:
+                LOGGER.info("Arthur attempt %d failed in <2s (elapsed: %.2fs); triggering micro-retry", attempt, elapsed)
+                continue
+            else:
+                break
 
         return None
 
@@ -468,33 +501,44 @@ class WarRoomOrchestrator:
             )
             user_prompt = f"Top candidate players: {cand_info}.\nCurrent User Roster: {user_roster}."
 
-            raw = call_llm_api(system_prompt, user_prompt, model=self.marcus.model, timeout_seconds=timeout_seconds)
-            if raw:
-                try:
-                    data = json.loads(raw)
-                    if validate_schema(data, "batched_evaluations.schema.json"):
-                        fresh_marcus_notes: Dict[str, str] = {}
-                        fresh_winston_notes: Dict[str, str] = {}
-                        fresh_marcus_list: List[Dict[str, Any]] = []
-                        fresh_winston_list: List[Dict[str, Any]] = []
+            t_batch_start = time.time()
+            max_attempts = 2
+            for attempt in range(1, max_attempts + 1):
+                raw = call_llm_api(system_prompt, user_prompt, model=self.marcus.model, timeout_seconds=timeout_seconds)
+                if raw:
+                    try:
+                        data = json.loads(raw)
+                        if validate_schema(data, "batched_evaluations.schema.json"):
+                            fresh_marcus_notes: Dict[str, str] = {}
+                            fresh_winston_notes: Dict[str, str] = {}
+                            fresh_marcus_list: List[Dict[str, Any]] = []
+                            fresh_winston_list: List[Dict[str, Any]] = []
 
-                        for item in data.get("evaluations", []):
-                            pid = str(item.get("player_id"))
-                            if pid and item.get("upside_sentence"):
-                                fresh_marcus_notes[pid] = item["upside_sentence"]
-                                fresh_marcus_list.append({"agent": "Marcus", "player_id": pid, "upside_sentence": item["upside_sentence"]})
-                            if pid and item.get("need_sentence"):
-                                fresh_winston_notes[pid] = item["need_sentence"]
-                                fresh_winston_list.append({"agent": "Winston", "player_id": pid, "need_sentence": item["need_sentence"]})
+                            for item in data.get("evaluations", []):
+                                pid = str(item.get("player_id"))
+                                if pid and item.get("upside_sentence"):
+                                    fresh_marcus_notes[pid] = item["upside_sentence"]
+                                    fresh_marcus_list.append({"agent": "Marcus", "player_id": pid, "upside_sentence": item["upside_sentence"]})
+                                if pid and item.get("need_sentence"):
+                                    fresh_winston_notes[pid] = item["need_sentence"]
+                                    fresh_winston_list.append({"agent": "Winston", "player_id": pid, "need_sentence": item["need_sentence"]})
 
-                        if fresh_marcus_notes and fresh_winston_notes:
-                            marcus_notes = fresh_marcus_notes
-                            winston_notes = fresh_winston_notes
-                            marcus_list = fresh_marcus_list
-                            winston_list = fresh_winston_list
-                            marcus_winston_success = True
-                except Exception as exc:
-                    LOGGER.warning("Failed to parse batched evaluation response: %s", exc)
+                            if fresh_marcus_notes and fresh_winston_notes:
+                                marcus_notes = fresh_marcus_notes
+                                winston_notes = fresh_winston_notes
+                                marcus_list = fresh_marcus_list
+                                winston_list = fresh_winston_list
+                                marcus_winston_success = True
+                                break
+                    except Exception as exc:
+                        LOGGER.warning("Failed to parse batched evaluation response: %s", exc)
+
+                elapsed_batch = time.time() - t_batch_start
+                if attempt < max_attempts and elapsed_batch < 2.0:
+                    LOGGER.info("Batched evaluation attempt %d failed in <2s (elapsed: %.2fs); triggering micro-retry", attempt, elapsed_batch)
+                    continue
+                else:
+                    break
 
         return marcus_notes, winston_notes, marcus_list, winston_list, marcus_winston_success
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
+import random
 from typing import Any, Dict, List, Optional, Sequence
 
 from engine.scoring_models import (
@@ -25,6 +26,8 @@ from engine.scoring_models import (
     z_score_normalize,
 )
 from engine.tier_cliff import calculate_prv_multiplier
+
+from config.settings import ENABLE_HIGH_STAKES_ADP
 
 LOGGER = logging.getLogger("ada_math")
 
@@ -45,11 +48,10 @@ def estimate_best_at_next_turn(
     picks_until_next_turn: int,
     current_pick: int = 1,
 ) -> float:
-    """Estimate expected best projection median remaining at next turn using ADP survival probability.
+    """Estimate expected best projection median remaining at next turn using Monte Carlo simulation.
 
-    Calculates survival probabilities for top candidate players remaining at target position based on
-    ADP distance to the target pick (current_pick + picks_until_next_turn).
-    Returns weighted average median projection.
+    Simulates 200 draft iterations incorporating blended multi-source ADP (Sleeper + Underdog)
+    and random draft room noise variance to output risk-adjusted expected value.
     """
     pos_players = [
         p for p in available_players
@@ -71,26 +73,47 @@ def estimate_best_at_next_turn(
         return float(pos_players_sorted[0].get("projection_median") or 0.0)
 
     target_pick = current_pick + picks_until_next_turn
-    top_3 = pos_players_sorted[:3]
+    top_candidates = pos_players_sorted[:10]
 
-    weighted_sum = 0.0
-    total_weight = 0.0
+    # Pre-calculate blended ADP for top candidates
+    candidate_data = []
+    for p in top_candidates:
+        underdog = p.get("underdog_adp")
+        sleeper = p.get("adp")
+        if ENABLE_HIGH_STAKES_ADP and underdog is not None and sleeper is not None:
+            blended_adp = (float(underdog) * 0.6) + (float(sleeper) * 0.4)
+        elif ENABLE_HIGH_STAKES_ADP and underdog is not None:
+            blended_adp = float(underdog)
+        elif sleeper is not None:
+            blended_adp = float(sleeper)
+        elif p.get("consensus_adp") is not None:
+            blended_adp = float(p["consensus_adp"])
+        else:
+            blended_adp = 999.0
 
-    for p in top_3:
-        adp_val = float(p.get("adp") if p.get("adp") is not None else p.get("consensus_adp") if p.get("consensus_adp") is not None else 999.0)
         proj = float(p.get("projection_median") or 0.0)
+        candidate_data.append((blended_adp, proj))
 
-        # Logistic survival probability: P(survival) = 1 / (1 + e^(-0.5 * (adp - target_pick)))
-        diff = adp_val - target_pick
-        survival_prob = 1.0 / (1.0 + math.exp(-0.5 * diff))
+    iterations = 200
+    expected_best_sum = 0.0
+    seed_val = hash((position.upper(), current_pick, target_pick, tuple(c[0] for c in candidate_data)))
+    rng = random.Random(seed_val)
 
-        weighted_sum += proj * survival_prob
-        total_weight += survival_prob
+    for _ in range(iterations):
+        best_survivor_proj = 0.0
+        for adp_val, proj in candidate_data:
+            # Inject random statistical noise multiplier (10% std dev) for draft room variance
+            noise = rng.gauss(mu=0.0, sigma=0.10)
+            simulated_pick = adp_val * (1.0 + noise)
 
-    if total_weight > 0:
-        return round(weighted_sum / total_weight, 4)
+            if simulated_pick > target_pick:
+                best_survivor_proj = proj
+                break
 
-    return float(top_3[0].get("projection_median") or 0.0)
+        expected_best_sum += best_survivor_proj
+
+    expected_best = expected_best_sum / iterations if iterations > 0 else 0.0
+    return round(expected_best, 4)
 
 
 def calculate_opportunity_cost_raw(
@@ -209,7 +232,7 @@ class AdaQuantEngine:
                 num_teams=num_teams,
                 drafted_counts=drafted_counts,
             )
-            fcvs_raw = calculate_fcvs_raw(player, current_round)
+            fcvs_raw = calculate_fcvs_raw(player, current_pick)
             hli_raw = calculate_hli_raw(player, user_roster, all_rosters, user_team_slot)
             prv_mult = calculate_prv_multiplier(pos, candidates_egp, recent_picks)
             rfit_mult = calculate_roster_fit(player, user_roster, current_round, roster_requirements, available_players=candidates_egp)

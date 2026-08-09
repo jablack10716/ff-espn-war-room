@@ -59,11 +59,34 @@ export const AdaRecommendations: React.FC = () => {
                         </span>
                         <span className="text-xs text-slate-400">{player.team || "FA"}</span>
                       </div>
-                      <div className="mt-0.5 flex items-center gap-3 text-xs text-slate-400">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                         <span>ADP: {player.adp ? player.adp : "N/A"}</span>
                         <span>•</span>
                         <span>Proj: {player.projection_median ? player.projection_median.toFixed(1) : "0.0"} pts</span>
                       </div>
+                      {player.data_sources && player.data_sources.length > 0 && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          {player.data_sources.map((src: string) => {
+                            const labelMap: Record<string, string> = {
+                              espn: "ESPN",
+                              sleeper: "Sleeper",
+                              fantasypros: "FantasyPros",
+                              underdog: "Underdog ADP",
+                              underdog_adp: "Underdog ADP",
+                              vegas: "Vegas Props",
+                              vegas_props: "Vegas Props",
+                              high_stakes: "ETR/PFF",
+                              advanced: "AirYards/xFP",
+                              advanced_metrics: "AirYards/xFP",
+                            };
+                            return (
+                              <span key={src} className="rounded bg-slate-800/90 border border-slate-700/60 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">
+                                {labelMap[src] || src}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   </div>
 
